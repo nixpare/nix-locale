@@ -75,16 +75,22 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const baseName = path.basename(id, '.tsx');
 					const key = `${baseName}__${translationCount++}`;
-					const attrs = nodePath.node.openingElement.attributes;
+					const localeAttrs: t.JSXAttribute[] = [];
+					const otherAttrs: t.JSXAttribute[] = [];
+
+					nodePath.node.openingElement.attributes.forEach(attr => {
+						if (t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name)) {
+							if (locales.includes(attr.name.name)) {
+								localeAttrs.push(attr);
+							} else {
+								otherAttrs.push(attr);
+							}
+						}
+					});
 
 					// Extract each locale map
-					attrs.forEach(attr => {
-						if (
-							t.isJSXAttribute(attr) &&
-							t.isJSXIdentifier(attr.name) &&
-							locales.includes(attr.name.name) &&
-							translations.has(attr.name.name)
-						) {
+					localeAttrs.forEach(attr => {
+						if (t.isJSXIdentifier(attr.name)) {
 							if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
 								translations.get(attr.name.name)!.set(key, attr.value);
 							} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
@@ -217,6 +223,8 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						)
 					)])
 
+					const propsId = t.identifier('props');
+
 					const returnStmt = t.returnStatement(
 						t.jsxElement(
 							t.jsxOpeningElement(
@@ -228,7 +236,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 										t.jsxElement(
 											t.jsxOpeningElement(
 												t.jsxIdentifier(fallbackName),
-												[],
+												[ t.jsxSpreadAttribute(propsId) ],
 												true
 											),
 											null,
@@ -244,7 +252,10 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							),
 							[
 								t.jsxElement(
-									t.jsxOpeningElement(t.jsxIdentifier('Selected'), [], true),
+									t.jsxOpeningElement(
+										t.jsxIdentifier('Selected'),
+										[ t.jsxSpreadAttribute(propsId) ],
+										true),
 									null,
 									[],
 									true
@@ -256,7 +267,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const functionDecl = t.functionDeclaration(
 						t.identifier(compName),
-						[],
+						[ propsId ],
 						t.blockStatement([
 							useLocaleDecl,
 							usePrevLocaleDecl,
@@ -273,7 +284,11 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					nodePath.replaceWith(
 						t.jsxElement(
-							t.jsxOpeningElement(t.jsxIdentifier(compName), [], true),
+							t.jsxOpeningElement(
+								t.jsxIdentifier(compName),
+								otherAttrs,
+								true
+							),
 							null,
 							[],
 							true
@@ -287,7 +302,14 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 				const exports: string[] = [];
 				map.forEach((expr, key) => {
 					const jsxCode = generate(expr, {}).code;
-					exports.push(`export const ${key} = () => (${jsxCode});`);
+					if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
+						// Se l'utente ha scritto ({ name }) => <>Ciao, {name}</>
+						// lo esportiamo così com'è, come componente React
+						exports.push(`export const ${key} = ${jsxCode};`);
+					} else {
+						// altrimenti incapsuliamo il literal/JSX in un componente che non prende props
+						exports.push(`export const ${key} = ({}) => (${jsxCode});`);
+					}
 				});
 
 				const moduleContent = `
