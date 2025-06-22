@@ -1,4 +1,4 @@
-import { type Plugin } from 'vite';
+import { ModuleNode, type Plugin } from 'vite';
 import { parse } from '@babel/parser';
 import { default as traverse } from '@babel/traverse';
 import { generate } from '@babel/generator';
@@ -376,6 +376,23 @@ export default { ${Array.from(map.keys()).join(', ')} };
 			}
 
 			return null;
+		},
+
+		async handleHotUpdate({ file, server, modules }) {
+			if (!file.endsWith('.tsx') || !filter(file)) {
+				return;
+			}
+
+			const invalidatedModules = new Set<ModuleNode>()
+			for (const modId of Object.keys(virtualModules)) {
+				const mod = await server.moduleGraph.getModuleByUrl(modId);
+				invalidatedModules.add(mod!);
+
+				delete virtualModules[modId];
+				server.moduleGraph.invalidateModule(mod!);
+			}
+
+			return Array.from(invalidatedModules);
 		}
 	};
 }
