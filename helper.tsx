@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLocale, LocaleType } from YOUR_LOCALE_PACKAGE;
+import { useLocale, type LocaleType } from YOUR_LOCALE_PACKAGE;
 
 type TranslationMap<P extends object> = {
 	[L in LocaleType]: React.ReactNode | ((props: P) => React.ReactNode);
