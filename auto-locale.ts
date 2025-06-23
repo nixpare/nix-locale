@@ -85,20 +85,20 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const baseName = path.basename(id, '.tsx');
 					const key = `${baseName}__${translationCount++}`;
-					const localeAttrs: t.JSXAttribute[] = [];
+					const localesAttrs: t.JSXAttribute[] = [];
 					const otherAttrs: t.JSXAttribute[] = [];
 
 					nodePath.node.openingElement.attributes.forEach(attr => {
 						if (t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name)) {
 							if (locales.includes(attr.name.name)) {
-								localeAttrs.push(attr);
+								localesAttrs.push(attr);
 							} else {
 								otherAttrs.push(attr);
 							}
 						}
 					});
 
-					localeAttrs.forEach(attr => {
+					localesAttrs.forEach(attr => {
 						if (t.isJSXIdentifier(attr.name)) {
 							if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
 								translations.get(attr.name.name)!.set(key, attr.value);
@@ -299,8 +299,60 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					modified = true;
 				},
 				CallExpression(nodePath) {
-					if (!t.isIdentifier(nodePath.node.callee, { name: hookHelper })) {
+					if (!t.isIdentifier(nodePath.node.callee)) {
 						return;
+					}
+
+					if (nodePath.node.callee.name === 't') {
+						if (!t.isObjectExpression(nodePath.node.arguments[0])) {
+							return;
+						}
+
+						const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
+
+						const selection = nodePath.node.arguments[0].properties.reduce<t.Expression | undefined>((prev, prop) => {
+							if (prev) {
+								return prev
+							}
+
+							if (!t.isObjectProperty(prop) || !t.isIdentifier(prop.key)) {
+								return;
+							}
+
+							if (!locales.includes(prop.key.name) || prop.key.name !== defaultLocale) {
+								return;
+							}
+
+							if (t.isExpression(prop.value)) {
+								return prop.value;
+							} else {
+								console.error('invalid', prop.value);
+								return undefined
+							}
+						}, undefined);
+
+						if (selection == undefined) {
+							return
+						}
+
+						if (t.isArrowFunctionExpression(selection) || t.isFunctionExpression(selection)) {
+							nodePath.replaceWith(
+								t.callExpression(
+									selection,
+									argAttr != undefined ? [argAttr] : []
+								)
+							);
+						} else {
+							nodePath.replaceWith(
+								selection
+							);
+						}
+
+						return
+					}
+
+					if (nodePath.node.callee.name !== hookHelper) {
+						return
 					}
 
 					if (!t.isObjectExpression(nodePath.node.arguments[0])) {
@@ -556,6 +608,7 @@ export default { ${Array.from(map.keys()).join(', ')} };
 				);
 
 				const output = generate(ast, {}, code).code;
+				console.log(output)
 
 				return {
 					code: output,
