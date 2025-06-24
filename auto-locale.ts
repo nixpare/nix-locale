@@ -13,10 +13,12 @@ export interface AutoLocaleOptions {
 	locales: string[];
 	// default locale
 	default: string;
-	// default 'T'
-	componentHelperName?: string;
+	// default 't'
+	staticHelperName?: string
 	// default 'useT'
 	hookHelperName?: string;
+	// default 'T'
+	componentHelperName?: string;
 	// default 'useLocale'
 	useLocaleName?: string;
 	// path to import useLocale implementation
@@ -27,8 +29,9 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const filter = createFilter(options.include, options.exclude);
 	const locales = options.locales;
 	const defaultLocale = options.default;
-	const componentHelper = options.componentHelperName || 'T';
+	const staticHelper = options.staticHelperName || 't';
 	const hookHelper = options.hookHelperName || 'useT';
+	const componentHelper = options.componentHelperName || 'T';
 	const useLocaleName = options.useLocaleName || 'useLocale';
 	const useLocaleImportPath = options.useLocaleImportPath;
 
@@ -37,14 +40,13 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const reactImportAlias = t.identifier("AutoLocale_React")
 	const useLocaleImportAlias = t.identifier("AutoLocale_useLocale")
 
-	const virtualModules: Record<string, string> = {};
 	const virtualModulePrefix = 'virtual:auto-locale'
+	const virtualModules: Record<string, string> = {};
+	const affectedModules: Record<string, boolean> = {};
 
 	// Accumulator: Map<locale, Map<key, ASTNode>>
 	const translations = new Map<string, Map<string, t.Expression>>();
 	locales.forEach(l => translations.set(l, new Map()));
-
-	let translationCount = 0;
 
 	return {
 		name: 'vite-auto-locale',
@@ -68,13 +70,18 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 		// 3) Transform source files
 		transform(code, id) {
-			if (!filter(id) || !id.endsWith('.tsx')) return null;
+			if (!filter(id) || (!id.endsWith('.tsx') && !id.endsWith('.ts'))) return null;
+			
 			const ast = parse(code, {
 				sourceType: 'module',
 				plugins: ['typescript', 'jsx'],
 			});
 
 			let modified = false;
+			let translationCount = 0;
+
+			const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
+			const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
 
 			// @ts-ignore
 			(traverse.default as typeof traverse)(ast, {
@@ -83,17 +90,16 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					const baseName = path.basename(id, '.tsx');
 					const key = `${baseName}__${translationCount++}`;
 					const localesAttrs: t.JSXAttribute[] = [];
-					const otherAttrs: t.JSXAttribute[] = [];
+					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
+						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
+					});
 
 					nodePath.node.openingElement.attributes.forEach(attr => {
 						if (t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name)) {
 							if (locales.includes(attr.name.name)) {
 								localesAttrs.push(attr);
-							} else {
-								otherAttrs.push(attr);
 							}
 						}
 					});
@@ -288,7 +294,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						t.jsxElement(
 							t.jsxOpeningElement(
 								t.jsxIdentifier(compName),
-								otherAttrs,
+								argAttr != undefined ? [argAttr] : [],
 								true
 							),
 							null,
@@ -303,7 +309,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					if (nodePath.node.callee.name === 't') {
+					if (nodePath.node.callee.name === staticHelper) {
 						if (!t.isObjectExpression(nodePath.node.arguments[0])) {
 							return;
 						}
@@ -348,20 +354,19 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							);
 						}
 
+						modified = true;
 						return
 					}
 
 					if (nodePath.node.callee.name !== hookHelper) {
-						return
+						return;
 					}
 
 					if (!t.isObjectExpression(nodePath.node.arguments[0])) {
 						return;
 					}
 
-					const baseName = path.basename(id, '.tsx');
 					const key = `${baseName}__${translationCount++}`;
-
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
 
 					nodePath.node.arguments[0].properties.forEach(prop => {
@@ -393,11 +398,15 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							[
 								t.arrowFunctionExpression(
 									[t.identifier('module')],
-									t.memberExpression(
-										t.identifier('module'),
-										t.stringLiteral(key),
-										true
-									)
+									t.blockStatement([
+										t.returnStatement(
+											t.memberExpression(
+												t.identifier('module'),
+												t.stringLiteral(key),
+												true
+											)
+										)
+									])
 								)
 							]
 						);
@@ -417,7 +426,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					)
 
 					const asyncHooksDecls = locales.map(locale => {
-						if (locale === defaultLocale) {
+						/* if (locale === defaultLocale) {
 							return t.variableDeclaration(
 								"const",
 								[t.variableDeclarator(
@@ -431,7 +440,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									)
 								)]
 							)
-						} else {
+						} else { */
 							return t.variableDeclaration(
 								"const",
 								[t.variableDeclarator(
@@ -439,7 +448,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									importCall(locale)
 								)]
 							)
-						}
+						//}
 					})
 
 					const mapId = t.identifier('map')
@@ -465,13 +474,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						)
 					])
 
-					const prevLocaleId = t.identifier('prevLocaleRef')
-					const usePrevLocaleDecl = t.variableDeclaration('const', [t.variableDeclarator(
-						prevLocaleId,
-						t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useRef')), [t.identifier('locale')])
-					)])
-
-					const propsId = t.identifier('props');
+					const propsId = argAttr && t.identifier('props');
 
 					const resultId = t.identifier('result')
 					const setResultId = t.identifier('setResult')
@@ -481,27 +484,10 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							t.memberExpression(reactImportAlias, t.identifier('useState')),
 							[t.callExpression(
 								defaultHookId,
-								[propsId]
+								propsId ? [propsId] : []
 							)]
 						)
 					)])
-
-					const useEffectUpdatePrevDecl = t.expressionStatement(
-						t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useEffect')), [
-							t.arrowFunctionExpression(
-								[],
-								t.blockStatement([
-									t.expressionStatement(
-										t.assignmentExpression('=',
-											t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')),
-											t.identifier('locale')
-										)
-									)
-								])
-							),
-							t.arrayExpression([t.identifier('locale')])
-						])
-					)
 
 					const selectedId = t.identifier('selected')
 					const selectedDecl = t.variableDeclaration('const', [
@@ -520,6 +506,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							t.arrowFunctionExpression(
 								[],
 								t.blockStatement([
+									selectedDecl,
 									t.expressionStatement(
 										t.callExpression(
 											t.memberExpression(
@@ -532,7 +519,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 													setResultId,
 													[t.callExpression(
 														t.identifier('f'),
-														[propsId]
+														propsId ? [propsId] : []
 													)]
 												)
 											)]
@@ -540,7 +527,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									)
 								])
 							),
-							t.arrayExpression([t.identifier('locale')])
+							t.arrayExpression([localeId])
 						])
 					)
 
@@ -549,14 +536,11 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					const hookId = t.identifier(hookName)
 					const functionDecl = t.functionDeclaration(
 						hookId,
-						[propsId],
+						propsId ? [propsId] : [t.identifier('props')],
 						t.blockStatement([
 							mapDecl,
 							useLocaleDecl,
-							usePrevLocaleDecl,
 							useStateResultDecl,
-							useEffectUpdatePrevDecl,
-							selectedDecl,
 							useEffectAsyncFetch,
 							returnStmt
 						])
@@ -569,7 +553,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					nodePath.replaceWith(
 						t.callExpression(
 							hookId,
-							argAttr != undefined ? [argAttr] : []
+							argAttr ? [argAttr] : []
 						)
 					);
 					modified = true;
@@ -596,6 +580,8 @@ export default { ${Array.from(map.keys()).join(', ')} };
 			});
 
 			if (modified) {
+				affectedModules[id] = true
+
 				ast.program.body.unshift(
 					t.importDeclaration(
 						[t.importDefaultSpecifier(reactImportAlias)],
@@ -608,30 +594,40 @@ export default { ${Array.from(map.keys()).join(', ')} };
 				);
 
 				const output = generate(ast, {}, code).code;
-				console.log(output)
 
 				return {
 					code: output,
 					map: null,
 				};
+			} else {
+				delete affectedModules[id]
 			}
 
 			return null;
 		},
 
 		// 4) Handle Hot Module Reload
-		async handleHotUpdate({ file, server }) {
+		async handleHotUpdate({ file, server, modules }) {
 			if (!file.endsWith('.tsx') || !filter(file)) {
 				return;
 			}
 
-			const invalidatedModules = new Set<ModuleNode>()
-			for (const modId of Object.keys(virtualModules)) {
-				const mod = await server.moduleGraph.getModuleByUrl(modId);
-				invalidatedModules.add(mod!);
+			const invalidatedModules = new Set(modules);
+			for (const mod of modules.values()) {
+				if (Object.keys(affectedModules).includes(mod.id ?? '')) {
+					for (const modId of Object.keys(virtualModules)) {
+						const mod = await server.moduleGraph.getModuleByUrl(modId);
+						invalidatedModules.add(mod!);
+						server.moduleGraph.invalidateModule(mod!);
+					}
 
-				delete virtualModules[modId];
-				server.moduleGraph.invalidateModule(mod!);
+					for (const modId of Object.keys(affectedModules)) {
+						const mod = await server.moduleGraph.getModuleByUrl(modId);
+						mod && invalidatedModules.add(mod);
+					}
+
+					break;
+				}
 			}
 
 			return Array.from(invalidatedModules);
