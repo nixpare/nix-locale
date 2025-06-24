@@ -614,7 +614,6 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 			);
 
 			const output = generate(ast, {}, code);
-			id.includes('Footer') && console.log(id, output.code)
 			return output;
 		},
 
