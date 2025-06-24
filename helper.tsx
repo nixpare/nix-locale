@@ -47,7 +47,7 @@ import { useLocale as AutoLocale_useLocale } from USE_LOCALE_PATH;
 import AutoLocale_React from "react";
 
 // if lang0 is default
-import { file__index as useAutoLocale_file__index_default } from "virtual:auto-locale/default.jsx";
+const file__index as useAutoLocale_file__index_default = (props) => VALUE_FROM_FILE
 const useAutoLocale_file__index_lang0 = () => Promise.resolve(useAutoLocale_file__index_default);
 // if lang1 is not default
 const useAutoLocale_file__index_lang1 = () => import("virtual:auto-locale/lang1.jsx").then(module => module["file__index"]);
@@ -60,12 +60,7 @@ function useAutoLocale_file__index(props) {
 	};
 
 	const locale = AutoLocale_useLocale();
-	const prevLocaleRef = AutoLocale_React.useRef(locale);
 	const [result, setResult] = AutoLocale_React.useState(useAutoLocale_file__index_default(props));
-
-	AutoLocale_React.useEffect(() => {
-		prevLocaleRef.current = locale;
-	}, [locale]);
 
 	const selected = map[locale];
 	AutoLocale_React.useEffect(() => {

@@ -42,11 +42,41 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 	const virtualModulePrefix = 'virtual:auto-locale'
 	const virtualModules: Record<string, string> = {};
-	const affectedModules: Record<string, boolean> = {};
+	let versionCounter = 0;
+
+	const componentKey = (id: string, count: number): [string, string] => {
+		const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
+		const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
+		const componentBase = `${baseName}__${count}`;
+		return [componentBase, `${componentBase}_${versionCounter}`];
+	}
+
+	const virtualModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
 
 	// Accumulator: Map<locale, Map<key, ASTNode>>
-	const translations = new Map<string, Map<string, t.Expression>>();
+	const translations = new Map<string, Map<string, { key: string, expr: t.Expression }>>();
 	locales.forEach(l => translations.set(l, new Map()));
+
+	const generateVirtualModules = () => {
+		translations.forEach((map, locale) => {
+			const exports: string[] = [];
+			map.forEach(({key, expr}) => {
+				const jsCode = generate(expr, {}).code;
+				if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
+					exports.push(`export const ${key} = ${jsCode};`);
+				} else {
+					exports.push(`export const ${key} = () => (${jsCode});`);
+				}
+			});
+
+			const moduleContent = `
+${exports.join('\n\n')}
+
+export default { ${Array.from(map.values()).map(value => value.key).join(', ')} };
+`;
+			virtualModules[`${virtualModuleId(locale).value}.jsx`] = moduleContent
+		});
+	}
 
 	return {
 		name: 'vite-auto-locale',
@@ -55,9 +85,8 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 		// 1) Resolve virtual module IDs
 		resolveId(source) {
 			if (source.startsWith(`${virtualModulePrefix}/`)) {
-				return source;
+				return source + ".jsx";
 			}
-			return null;
 		},
 
 		// 2) Load virtual module content
@@ -65,12 +94,11 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 			if (id in virtualModules) {
 				return virtualModules[id];
 			}
-			return null;
 		},
 
 		// 3) Transform source files
 		transform(code, id) {
-			if (!filter(id) || (!id.endsWith('.tsx') && !id.endsWith('.ts'))) return null;
+			if (!filter(id) || !id.endsWith('.tsx')) return null;
 			
 			const ast = parse(code, {
 				sourceType: 'module',
@@ -80,9 +108,6 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 			let modified = false;
 			let translationCount = 0;
 
-			const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
-			const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
-
 			// @ts-ignore
 			(traverse.default as typeof traverse)(ast, {
 				JSXElement(nodePath) {
@@ -90,7 +115,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					const key = `${baseName}__${translationCount++}`;
+					const [componentBase, key] = componentKey(id, translationCount++);
 					const localesAttrs: t.JSXAttribute[] = [];
 					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
 						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
@@ -107,16 +132,14 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					localesAttrs.forEach(attr => {
 						if (t.isJSXIdentifier(attr.name)) {
 							if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
-								translations.get(attr.name.name)!.set(key, attr.value);
+								translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value });
 							} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
-								translations.get(attr.name.name)!.set(key, attr.value.expression);
+								translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value.expression });
 							} else {
 								console.error(attr.value)
 							}
 						}
 					});
-
-					const virtualModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}.jsx`)
 
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
@@ -366,7 +389,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					const key = `${baseName}__${translationCount++}`;
+					const [componentBase, key] = componentKey(id, translationCount++);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
 
 					nodePath.node.arguments[0].properties.forEach(prop => {
@@ -379,13 +402,11 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						}
 
 						if (t.isExpression(prop.value)) {
-							translations.get(prop.key.name)!.set(key, prop.value);
+							translations.get(prop.key.name)!.set(componentBase, { key, expr: prop.value });
 						} else {
 							console.error('invalid', prop.value);
 						}
 					});
-
-					const virtualModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}.jsx`)
 					
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
@@ -420,13 +441,28 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					const hookName = `${hookPrefix}_${key}`;
 
 					const defaultHookId = t.identifier(`${hookName}_default`);
-					const defaultHookDecl = t.importDeclaration(
-						[t.importSpecifier(defaultHookId, t.identifier(key))],
-						virtualModuleId(defaultLocale)
-					)
+					const defaultExpr = translations.get(defaultLocale)!.get(componentBase)?.expr;
+					const defaultHookDecl = t.isArrowFunctionExpression(defaultExpr) || t.isFunctionExpression(defaultExpr)
+						? t.variableDeclaration(
+							'const',
+							[t.variableDeclarator(
+								defaultHookId,
+								defaultExpr
+							)]
+						)
+						: t.variableDeclaration(
+							'const',
+							[t.variableDeclarator(
+								defaultHookId,
+								t.arrowFunctionExpression(
+									[],
+									defaultExpr ?? t.identifier('undefined')
+								)
+							)]
+						)
 
 					const asyncHooksDecls = locales.map(locale => {
-						/* if (locale === defaultLocale) {
+						if (locale === defaultLocale) {
 							return t.variableDeclaration(
 								"const",
 								[t.variableDeclarator(
@@ -440,7 +476,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									)
 								)]
 							)
-						} else { */
+						} else {
 							return t.variableDeclaration(
 								"const",
 								[t.variableDeclarator(
@@ -448,7 +484,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									importCall(locale)
 								)]
 							)
-						//}
+						}
 					})
 
 					const mapId = t.identifier('map')
@@ -536,7 +572,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					const hookId = t.identifier(hookName)
 					const functionDecl = t.functionDeclaration(
 						hookId,
-						propsId ? [propsId] : [t.identifier('props')],
+						propsId ? [propsId] : [],
 						t.blockStatement([
 							mapDecl,
 							useLocaleDecl,
@@ -560,77 +596,43 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 				}
 			});
 
-			translations.forEach((map, locale) => {
-				const exports: string[] = [];
-				map.forEach((expr, key) => {
-					const jsCode = generate(expr, {}).code;
-					if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
-						exports.push(`export const ${key} = ${jsCode};`);
-					} else {
-						exports.push(`export const ${key} = () => (${jsCode});`);
-					}
-				});
+			generateVirtualModules()
 
-				const moduleContent = `
-${exports.join('\n\n')}
-
-export default { ${Array.from(map.keys()).join(', ')} };
-`;
-				virtualModules[`${virtualModulePrefix}/${locale}.jsx`] = moduleContent
-			});
-
-			if (modified) {
-				affectedModules[id] = true
-
-				ast.program.body.unshift(
-					t.importDeclaration(
-						[t.importDefaultSpecifier(reactImportAlias)],
-						t.stringLiteral("react")
-					),
-					t.importDeclaration(
-						[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
-						t.stringLiteral(useLocaleImportPath)
-					)
-				);
-
-				const output = generate(ast, {}, code).code;
-
-				return {
-					code: output,
-					map: null,
-				};
-			} else {
-				delete affectedModules[id]
-			}
-
-			return null;
-		},
-
-		// 4) Handle Hot Module Reload
-		async handleHotUpdate({ file, server, modules }) {
-			if (!file.endsWith('.tsx') || !filter(file)) {
+			if (!modified) {
 				return;
 			}
 
-			const invalidatedModules = new Set(modules);
-			for (const mod of modules.values()) {
-				if (Object.keys(affectedModules).includes(mod.id ?? '')) {
-					for (const modId of Object.keys(virtualModules)) {
-						const mod = await server.moduleGraph.getModuleByUrl(modId);
-						invalidatedModules.add(mod!);
-						server.moduleGraph.invalidateModule(mod!);
-					}
+			ast.program.body.unshift(
+				t.importDeclaration(
+					[t.importDefaultSpecifier(reactImportAlias)],
+					t.stringLiteral("react")
+				),
+				t.importDeclaration(
+					[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
+					t.stringLiteral(useLocaleImportPath)
+				)
+			);
 
-					for (const modId of Object.keys(affectedModules)) {
-						const mod = await server.moduleGraph.getModuleByUrl(modId);
-						mod && invalidatedModules.add(mod);
-					}
+			const output = generate(ast, {}, code);
+			id.includes('Footer') && console.log(id, output.code)
+			return output;
+		},
 
-					break;
-				}
+		// 4) Handle Hot Module Reload
+		async handleHotUpdate({ file, server, modules, timestamp }) {
+			if (!file.endsWith('.tsx') || !filter(file)) {
+				return modules;
 			}
 
-			return Array.from(invalidatedModules);
+			versionCounter++;
+
+			const invalidatedModules = [...modules];
+			for (const modId of Object.keys(virtualModules)) {
+				const mod = server.moduleGraph.getModuleById(modId);
+				invalidatedModules.push(mod!)
+			}
+
+			return invalidatedModules
 		}
 	};
 }
