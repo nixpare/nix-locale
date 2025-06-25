@@ -1,10 +1,11 @@
 import { ModuleNode, type Plugin } from 'vite';
 import { parse } from '@babel/parser';
 import { default as traverse } from '@babel/traverse';
-import { generate } from '@babel/generator';
+import { generate, type GeneratorResult } from '@babel/generator';
 import * as t from '@babel/types';
 import { createFilter } from '@rollup/pluginutils';
 import path from 'path';
+import fs from 'fs';
 
 export interface AutoLocaleOptions {
 	include?: string | string[];
@@ -25,6 +26,14 @@ export interface AutoLocaleOptions {
 	useLocaleImportPath: string;
 }
 
+type TranslationsMapType = Map<string, Map<string, {
+	key: string;
+	expr: t.Expression;
+}>>
+
+// @ts-ignore
+if (!globalThis.__AUTO_LOCALE_STATE__) globalThis.__AUTO_LOCALE_STATE__ = { translations: new Map(), version: 0 };
+
 export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const filter = createFilter(options.include, options.exclude);
 	const locales = options.locales;
@@ -41,40 +50,70 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const useLocaleImportAlias = t.identifier("AutoLocale_useLocale")
 
 	const virtualModulePrefix = 'virtual:auto-locale'
-	const virtualModules: Record<string, string> = {};
-	let versionCounter = 0;
+	const virtualModules: Record<string, GeneratorResult> = {};
+	// Accumulator: Map<locale, Map<key, ASTNode>>
+	// @ts-ignore
+	const context = globalThis.__AUTO_LOCALE_STATE__ as { translations: TranslationsMapType, version: number };
+	locales.forEach(locale => {
+		if (!context.translations.has(locale)) {
+			context.translations.set(locale, new Map())
+		}
+	});
 
 	const componentKey = (id: string, count: number): [string, string] => {
 		const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
 		const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
 		const componentBase = `${baseName}__${count}`;
-		return [componentBase, `${componentBase}_${versionCounter}`];
+		return [componentBase, `${componentBase}_${context.version}`];
 	}
 
 	const virtualModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
 
-	// Accumulator: Map<locale, Map<key, ASTNode>>
-	const translations = new Map<string, Map<string, { key: string, expr: t.Expression }>>();
-	locales.forEach(l => translations.set(l, new Map()));
-
 	const generateVirtualModules = () => {
-		translations.forEach((map, locale) => {
-			const exports: string[] = [];
+		context.translations.forEach((map, locale) => {
+			const exports: t.Statement[] = [];
+			
 			map.forEach(({key, expr}) => {
-				const jsCode = generate(expr, {}).code;
 				if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
-					exports.push(`export const ${key} = ${jsCode};`);
+					exports.push(t.exportNamedDeclaration(
+						t.variableDeclaration(
+							"const",
+							[t.variableDeclarator(
+								t.identifier(key),
+								expr
+							)]
+						)
+					));
 				} else {
-					exports.push(`export const ${key} = () => (${jsCode});`);
+					exports.push(t.exportNamedDeclaration(
+						t.variableDeclaration(
+							"const",
+							[t.variableDeclarator(
+								t.identifier(key),
+								t.arrowFunctionExpression(
+									[],
+									expr
+								)
+							)]
+						)
+					));
 				}
 			});
+			exports.push(t.exportDefaultDeclaration(
+				t.objectExpression(
+					Array.from(map.values()).map(({ key }) => t.objectProperty(
+						t.identifier(key),
+						t.identifier(key)
+					))
+				)
+			))
 
-			const moduleContent = `
-${exports.join('\n\n')}
+			const programNode = t.program(exports, [], "module");
+			const fileNode = t.file(programNode);
+			const module = generate(fileNode);
 
-export default { ${Array.from(map.values()).map(value => value.key).join(', ')} };
-`;
-			virtualModules[`${virtualModuleId(locale).value}.jsx`] = moduleContent
+			fs.writeFileSync(`build/${locale}.jsx`, module.code, 'utf8');
+			virtualModules[`${virtualModuleId(locale).value}.jsx`] = module;
 		});
 	}
 
@@ -89,6 +128,12 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 			}
 		},
 
+		resolveDynamicImport(_, importer) {
+			if (importer.startsWith(`${virtualModulePrefix}/`)) {
+				return importer + ".jsx";
+			}
+		},
+
 		// 2) Load virtual module content
 		load(id) {
 			if (id in virtualModules) {
@@ -99,7 +144,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 		// 3) Transform source files
 		transform(code, id) {
 			if (!filter(id) || !id.endsWith('.tsx')) return null;
-			
+
 			const ast = parse(code, {
 				sourceType: 'module',
 				plugins: ['typescript', 'jsx'],
@@ -107,6 +152,8 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 
 			let modified = false;
 			let translationCount = 0;
+
+			const defaultImportId = t.identifier(`${componentPrefix}_default`);
 
 			// @ts-ignore
 			(traverse.default as typeof traverse)(ast, {
@@ -116,28 +163,26 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 					}
 
 					const [componentBase, key] = componentKey(id, translationCount++);
-					const localesAttrs: t.JSXAttribute[] = [];
+
 					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
 						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
 					});
 
 					nodePath.node.openingElement.attributes.forEach(attr => {
-						if (t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name)) {
-							if (locales.includes(attr.name.name)) {
-								localesAttrs.push(attr);
-							}
+						if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) {
+							return
 						}
-					});
 
-					localesAttrs.forEach(attr => {
-						if (t.isJSXIdentifier(attr.name)) {
-							if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
-								translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value });
-							} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
-								translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value.expression });
-							} else {
-								console.error(attr.value)
-							}
+						if (!locales.includes(attr.name.name) || !t.isJSXIdentifier(attr.name)) {
+							return
+						}
+
+						if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
+							context.translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value });
+						} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
+							context.translations.get(attr.name.name)!.set(componentBase, { key, expr: attr.value.expression });
+						} else {
+							console.error(attr.value)
 						}
 					});
 
@@ -158,8 +203,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 												t.identifier('default'),
 												t.memberExpression(
 													t.identifier('module'),
-													t.stringLiteral(key),
-													true
+													t.identifier(key)
 												)
 											)
 										])
@@ -179,17 +223,19 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 
 					const compName = `${componentPrefix}_${key}`
 
-					const lazyCompDecls = locales.map(locale => {
-						const compId = t.identifier(`${compName}_${locale}`)
+					const componentsImports = locales
+						.filter(locale => locale !== defaultLocale)
+						.map(locale => {
+							const compId = t.identifier(`${compName}_${locale}`)
 
-						return t.variableDeclaration(
-							"const",
-							[t.variableDeclarator(
-								compId,
-								importCall(locale)
-							)]
-						)
-					})
+							return t.variableDeclaration(
+								"const",
+								[t.variableDeclarator(
+									compId,
+									importCall(locale)
+								)]
+							)
+						})
 
 					const mapId = t.identifier('Map')
 					const mapDecl = t.variableDeclaration('const', [
@@ -199,7 +245,12 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 								locales.map(locale =>
 									t.objectProperty(
 										t.identifier(locale),
-										t.identifier(`${compName}_${locale}`)
+										locale !== defaultLocale
+											? t.identifier(`${compName}_${locale}`)
+											: t.memberExpression(
+												defaultImportId,
+												t.identifier(key)
+											)
 									)
 								)
 							)
@@ -240,10 +291,14 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 					const selectedDecl = t.variableDeclaration('const', [
 						t.variableDeclarator(
 							t.identifier('Selected'),
-							t.memberExpression(
-								mapId,
-								localeId,
-								true
+							t.logicalExpression(
+								'||',
+								t.memberExpression(
+									mapId,
+									localeId,
+									true
+								),
+								t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Component not found'))
 							)
 						)
 					]);
@@ -251,14 +306,18 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 					const fallbackName = 'Fallback'
 					const fallbackDecl = t.variableDeclaration('const', [t.variableDeclarator(
 						t.identifier(fallbackName),
-						t.memberExpression(
-							t.identifier('Map'),
-							t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')),
-							true
+						t.logicalExpression(
+							'||',
+							t.memberExpression(
+								t.identifier('Map'),
+								t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')),
+								true
+							),
+							t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Fallback component not found'))
 						)
 					)])
 
-					const propsId = t.identifier('props');
+					const propsId = argAttr && t.identifier('props');
 
 					const returnStmt = t.returnStatement(
 						t.jsxElement(
@@ -268,7 +327,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 									t.jsxElement(
 										t.jsxOpeningElement(
 											t.jsxIdentifier(fallbackName),
-											[t.jsxSpreadAttribute(propsId)],
+											propsId ? [t.jsxSpreadAttribute(propsId)] : [],
 											true
 										),
 										null,
@@ -285,7 +344,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 								t.jsxElement(
 									t.jsxOpeningElement(
 										t.jsxIdentifier('Selected'),
-										[ t.jsxSpreadAttribute(propsId) ],
+										propsId ? [t.jsxSpreadAttribute(propsId)] : [],
 										true),
 									null,
 									[],
@@ -298,7 +357,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 
 					const functionDecl = t.functionDeclaration(
 						t.identifier(compName),
-						[ propsId ],
+						propsId ? [propsId] : [],
 						t.blockStatement([
 							mapDecl,
 							useLocaleDecl,
@@ -310,14 +369,17 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 						])
 					)
 
-					ast.program.body.unshift(functionDecl)
-					ast.program.body.unshift(...lazyCompDecls)
+					const parent = nodePath.getFunctionParent()!;
+					componentsImports.forEach(decl => {
+						parent.insertBefore(decl)
+					})
+					parent.insertBefore(functionDecl)
 
 					nodePath.replaceWith(
 						t.jsxElement(
 							t.jsxOpeningElement(
 								t.jsxIdentifier(compName),
-								argAttr != undefined ? [argAttr] : [],
+								argAttr ? [argAttr] : [],
 								true
 							),
 							null,
@@ -325,6 +387,7 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 							true
 						)
 					);
+
 					modified = true;
 				},
 				CallExpression(nodePath) {
@@ -372,12 +435,9 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 								)
 							);
 						} else {
-							nodePath.replaceWith(
-								selection
-							);
+							nodePath.replaceWith(selection);
 						}
 
-						modified = true;
 						return
 					}
 
@@ -388,6 +448,8 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 					if (!t.isObjectExpression(nodePath.node.arguments[0])) {
 						return;
 					}
+
+					return;
 
 					const [componentBase, key] = componentKey(id, translationCount++);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
@@ -440,7 +502,6 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 
 					const hookName = `${hookPrefix}_${key}`;
 
-					const defaultHookId = t.identifier(`${hookName}_default`);
 					const defaultExpr = translations.get(defaultLocale)!.get(componentBase)?.expr;
 					const defaultHookDecl = t.isArrowFunctionExpression(defaultExpr) || t.isFunctionExpression(defaultExpr)
 						? t.variableDeclaration(
@@ -584,7 +645,6 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 
 					ast.program.body.unshift(functionDecl)
 					ast.program.body.unshift(...asyncHooksDecls)
-					ast.program.body.unshift(defaultHookDecl)
 
 					nodePath.replaceWith(
 						t.callExpression(
@@ -595,12 +655,11 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 					modified = true;
 				}
 			});
-
-			generateVirtualModules()
-
+			
 			if (!modified) {
 				return;
 			}
+			generateVirtualModules()
 
 			ast.program.body.unshift(
 				t.importDeclaration(
@@ -610,20 +669,29 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 				t.importDeclaration(
 					[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
 					t.stringLiteral(useLocaleImportPath)
+				),
+				t.importDeclaration(
+					[t.importDefaultSpecifier(defaultImportId)],
+					virtualModuleId(defaultLocale)
 				)
 			);
 
 			const output = generate(ast, {}, code);
+			/* if (id.includes('Nav')) {
+				console.log('-------------------------------')
+				console.log(output.code)
+				console.log('-------------------------------')
+			} */
 			return output;
 		},
 
 		// 4) Handle Hot Module Reload
-		async handleHotUpdate({ file, server, modules, timestamp }) {
+		async handleHotUpdate({ file, server, modules }) {
 			if (!file.endsWith('.tsx') || !filter(file)) {
-				return modules;
+				return;
 			}
 
-			versionCounter++;
+			context.version++;
 
 			const invalidatedModules = [...modules];
 			for (const modId of Object.keys(virtualModules)) {
@@ -634,4 +702,13 @@ export default { ${Array.from(map.values()).map(value => value.key).join(', ')} 
 			return invalidatedModules
 		}
 	};
+}
+
+function consoleLog(...expr: t.Expression[]) {
+	return t.expressionStatement(
+		t.callExpression(
+			t.memberExpression(t.identifier('console'), t.identifier('log')),
+			expr
+		)
+	)
 }
