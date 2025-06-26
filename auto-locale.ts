@@ -66,7 +66,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 	const virtualModulePrefix = 'virtual:auto-locale'
 	const virtualModules: Record<string, GeneratorResult> = {};
-	// Accumulator: Map<locale, Map<key, ASTNode>>
+	
 	// @ts-ignore
 	const context = globalThis.__AUTO_LOCALE_STATE__ as ContextType;
 	locales.forEach(locale => {
@@ -208,9 +208,6 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 				updateRootAst(patchAst);
 
 				const patchCode = generate(patchAst).code;
-				/* console.log('PATCH ---------------------------')
-				console.log(patchCode)
-				console.log('---------------------------------') */
 				return `${patchCode}\n\n${context.rootCode!}`
 			}
 		},
@@ -442,7 +439,6 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							useEffectUpdatePrevDecl,
 							selectedDecl,
 							fallbackDecl,
-							consoleLog(t.stringLiteral(compName), localeId, t.identifier('Map')),
 							returnStmt
 						])
 					)
