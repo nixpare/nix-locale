@@ -1,29 +1,67 @@
-import { ModuleNode, type Plugin } from 'vite';
-import { parse, type ParseResult } from '@babel/parser';
+import { type Plugin } from 'vite';
+import { parse } from '@babel/parser';
 import { default as traverse } from '@babel/traverse';
 import { generate, type GeneratorResult } from '@babel/generator';
 import * as t from '@babel/types';
 import { createFilter } from '@rollup/pluginutils';
 import path from 'path';
 import fs from 'fs';
+import fg from 'fast-glob';
 
 export interface AutoLocaleOptions {
+	/**
+	 * Include pattern for filtering the files to be parsed.
+	 * @default
+	 * ['**\/*.js', '**\/*.jsx', '**\/*.ts', '**\/*.tsx']
+	 */
 	include?: string | string[];
+	/**
+	 * Exclude pattern for filtering the files to be parsed.
+	 * @default
+	 * 'node_modules/**\/*'
+	 */
 	exclude?: string | string[];
-	// a list of languages to parse
+	/**
+	 * The list of languages to be parsed.
+	 * @example
+	 * ['en', 'it', 'de', 'default', 'something not standard']
+	 */
 	locales: string[];
-	// default locale
+	/**
+	 * The language from the `locales` option to be considered the default loaded language.
+	 * The other ones are lazily loaded
+	 */
 	default: string;
-	rootFile: string;
-	// default 't'
+	/**
+	 * The static helper function name. This must match the function defined in the helper file.
+	 * @default
+	 * 't'
+	 */
 	staticHelperName?: string
-	// default 'useT'
+	/**
+	 * The hook helper function name. This must match the function defined in the helper file.
+	 * @default
+	 * 'useT'
+	 */
 	hookHelperName?: string;
-	// default 'T'
+	/**
+	 * The component helper function name. This must match the function defined in the helper file.
+	 * @default
+	 * 'T'
+	 */
 	componentHelperName?: string;
-	// default 'useLocale'
+	/**
+	 * The name of the hook responsible of signaling any language change. This function used in the hook function
+	 * and component to determine the current language and listen to any changes. Use this property in conjunction with
+	 * the `useLocaleImportPath` option.
+	 * @default
+	 * 'useLocale'
+	 */
 	useLocaleName?: string;
-	// path to import useLocale implementation
+	/**
+	 * The import path of the hook responsible of signaling any language change. Use this property in conjunction with
+	 * the `useLocaleName` option.
+	 */
 	useLocaleImportPath: string;
 }
 
@@ -35,24 +73,21 @@ type TranslationsMap<T> = Map<string, Map<string, {
 type ContextType = {
 	version: number
 	translations: TranslationsMap<t.Expression>
-	rootId: string
-	rootCode?: string
-	rootContent: TranslationsMap<t.Statement[]>
 }
 
 // @ts-ignore
 if (!globalThis.__AUTO_LOCALE_STATE__) globalThis.__AUTO_LOCALE_STATE__ = {
 	version: 0,
-	translations: new Map(),
-	rootId: '',
-	rootContent: new Map()
+	translations: new Map()
 } satisfies ContextType;
 
 export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
-	const filter = createFilter(options.include, options.exclude);
+	let root: string;
+	const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx']
+	const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
+	
 	const locales = options.locales;
 	const defaultLocale = options.default;
-	const rootFile = options.rootFile;
 	const staticHelper = options.staticHelperName || 't';
 	const hookHelper = options.hookHelperName || 'useT';
 	const componentHelper = options.componentHelperName || 'T';
@@ -64,8 +99,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const reactImportAlias = t.identifier("AutoLocale_React")
 	const useLocaleImportAlias = t.identifier("AutoLocale_useLocale")
 
-	const virtualModulePrefix = 'virtual:auto-locale'
-	const virtualModules: Record<string, GeneratorResult> = {};
+	const virtualModules: Record<string, GeneratorResult> = {}
 	
 	// @ts-ignore
 	const context = globalThis.__AUTO_LOCALE_STATE__ as ContextType;
@@ -82,10 +116,55 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 		return [componentBase, `${componentBase}_${context.version}`];
 	}
 
-	const virtualModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
-	let rootVirtualCounter = 0;
+	const virtualModulePrefix = 'virtual:auto-locale'
+	const localesModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
 
-	const generateVirtualModules = () => {
+	const generateLocalesModules = async (...files: string[]) => {
+		if (files.length == 0) {
+			files = await fg(includeOption, { cwd: root, absolute: true })
+		}
+		
+		for (const id of files) {
+			if (!filter(id)) continue
+
+			const code = await fs.promises.readFile(id, 'utf-8')
+			const ast = parse(code, {
+				sourceType: 'module',
+				plugins: ['typescript', 'jsx'],
+			});
+
+			let translationCount = 0;
+
+			// @ts-ignore
+			(traverse.default as typeof traverse)(ast, {
+				JSXElement(nodePath) {
+					if (!t.isJSXIdentifier(nodePath.node.openingElement.name, { name: componentHelper })) {
+						return;
+					}
+
+					const [componentBase, key] = componentKey(id, translationCount++);
+
+					nodePath.node.openingElement.attributes.forEach(attr => {
+						if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) {
+							return
+						}
+
+						if (!locales.includes(attr.name.name) || !t.isJSXIdentifier(attr.name)) {
+							return
+						}
+
+						if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
+							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value });
+						} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
+							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value.expression });
+						} else {
+							console.error(attr.value)
+						}
+					});
+				}
+			});
+		}
+
 		context.translations.forEach((map, locale) => {
 			const exports: t.Statement[] = [];
 			
@@ -115,110 +194,47 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					));
 				}
 			});
-			exports.push(t.exportDefaultDeclaration(
-				t.objectExpression(
-					Array.from(map.values()).map(({ key }) => t.objectProperty(
-						t.identifier(key),
-						t.identifier(key)
-					))
-				)
-			))
 
 			const programNode = t.program(exports, [], "module");
 			const fileNode = t.file(programNode);
 			const module = generate(fileNode);
-
-			fs.writeFileSync(`build/${locale}.jsx`, module.code, 'utf8');
-			virtualModules[`${virtualModuleId(locale).value}.jsx`] = module;
+			
+			virtualModules[localesModuleId(locale).value + '.jsx'] = module
 		});
 	}
-
-	const updateRootAst = (ast: t.File) => {
-		for (const map of context.rootContent.values()) {
-			for (const { value: stmts } of map.values()) {
-				ast.program.body.unshift(...stmts)
-			}
-		}
-
-		ast.program.body.unshift(
-			t.importDeclaration(
-				[t.importDefaultSpecifier(reactImportAlias)],
-				t.stringLiteral("react")
-			),
-			t.importDeclaration(
-				[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
-				t.stringLiteral(useLocaleImportPath)
-			),
-			t.importDeclaration(
-				[t.importDefaultSpecifier(defaultImportId)],
-				virtualModuleId(defaultLocale)
-			)
-		);
-	}
-
-	const defaultImportId = t.identifier(`${componentPrefix}_default`);
 
 	return {
 		name: 'vite-auto-locale',
 		enforce: 'pre',
 
-		// 0) Resolve root file path
-		async buildStart() {
-			// Provo a risolvere il modulo rootImportPath (senza estensione)
-			// Rollup/Vite cercherà automaticamente .ts .tsx .js .jsx
-			const res = await this.resolve(rootFile, undefined, { skipSelf: true })
-			if (!res) {
-				this.error(`Impossibile risolvere ${rootFile}`)
-			}
-			context.rootId = res.id
+		configResolved(config) {
+			root = config.root
 		},
 
-		// 1) Resolve virtual module IDs
+		async buildStart() {
+			await generateLocalesModules()
+		},
+
 		resolveId(source) {
 			if (source.startsWith(`${virtualModulePrefix}/`)) {
-				return source + ".jsx";
-			}
-
-			if (source === context.rootId && context.rootCode) {
-				return source + `?v=${rootVirtualCounter++}`
+				return source + '.jsx';
 			}
 		},
 
 		resolveDynamicImport(_, importer) {
 			if (importer.startsWith(`${virtualModulePrefix}/`)) {
-				return importer + ".jsx";
-			}
-
-			if (importer === context.rootId && context.rootCode) {
-				return importer + `?v=${rootVirtualCounter++}`
+				return importer + '.jsx';
 			}
 		},
 
-		// 2) Load virtual module content
 		load(id) {
 			if (id in virtualModules) {
 				return virtualModules[id];
 			}
-
-			if (id.startsWith(`${context.rootId}?v=`)) {
-				const patch: t.Statement[] = [];
-				const patchProgram = t.program(patch, [], "module");
-				const patchAst = t.file(patchProgram);
-
-				updateRootAst(patchAst);
-
-				const patchCode = generate(patchAst).code;
-				return `${patchCode}\n\n${context.rootCode!}`
-			}
 		},
 
-		// 3) Transform source files
 		transform(code, id) {
-			if (!filter(id) || !id.endsWith('.tsx')) return null;
-
-			if (id === context.rootId) {
-				context.rootCode = code
-			}
+			if (!filter(id)) return null;
 
 			const ast = parse(code, {
 				sourceType: 'module',
@@ -235,34 +251,16 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++);
+					const [_, key] = componentKey(id, translationCount++);
 
 					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
 						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
 					});
 
-					nodePath.node.openingElement.attributes.forEach(attr => {
-						if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) {
-							return
-						}
-
-						if (!locales.includes(attr.name.name) || !t.isJSXIdentifier(attr.name)) {
-							return
-						}
-
-						if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
-							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value });
-						} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
-							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value.expression });
-						} else {
-							console.error(attr.value)
-						}
-					});
-
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
 							t.import(),
-							[virtualModuleId(locale)]
+							[localesModuleId(locale)]
 						)
 
 						const importWithThenDecl = t.callExpression(
@@ -297,9 +295,15 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					const compName = `${componentPrefix}_${key}`
 
 					const componentsImports = locales
-						.filter(locale => locale !== defaultLocale)
 						.map(locale => {
 							const compId = t.identifier(`${compName}_${locale}`)
+
+							if (locale === defaultLocale) {
+								return t.importDeclaration(
+									[t.importSpecifier(compId, t.identifier(key))],
+									localesModuleId(locale)
+								)
+							}
 
 							return t.variableDeclaration(
 								"const",
@@ -318,12 +322,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 								locales.map(locale =>
 									t.objectProperty(
 										t.identifier(locale),
-										locale !== defaultLocale
-											? t.identifier(`${compName}_${locale}`)
-											: t.memberExpression(
-												defaultImportId,
-												t.identifier(key)
-											)
+										t.identifier(`${compName}_${locale}`)
 									)
 								)
 							)
@@ -442,24 +441,9 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							returnStmt
 						])
 					)
-
-					const statements: t.Statement[] = []
-					componentsImports.forEach(decl => {
-						statements.push(decl)
-					})
-					statements.push(t.exportNamedDeclaration(functionDecl))
-
-					let fileMap = context.rootContent.get(id)
-					if (!fileMap) {
-						fileMap = new Map()
-						context.rootContent.set(id, fileMap)
-					}
-					fileMap.set(componentBase, { key, value: statements })
 					
-					nodePath.getFunctionParent()!.insertBefore(t.importDeclaration(
-						[t.importSpecifier(functionId, functionId)],
-						t.stringLiteral(context.rootId)
-					))
+					nodePath.getFunctionParent()!.insertBefore(componentsImports)
+					nodePath.getFunctionParent()!.insertBefore(functionDecl)
 
 					nodePath.replaceWith(
 						t.jsxElement(
@@ -476,7 +460,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					modified = true;
 				},
-				CallExpression(nodePath) {
+				/* CallExpression(nodePath) {
 					if (!t.isIdentifier(nodePath.node.callee)) {
 						return;
 					}
@@ -739,30 +723,36 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						)
 					);
 					modified = true;
-				}
+				} */
 			});
-
-			if (id === context.rootId && context.rootContent.size > 0) {
-				updateRootAst(ast)
-				modified = true
-			}
 			
 			if (!modified) {
 				return;
 			}
+
+			ast.program.body.unshift(
+				t.importDeclaration(
+					[t.importDefaultSpecifier(reactImportAlias)],
+					t.stringLiteral("react")
+				),
+				t.importDeclaration(
+					[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
+					t.stringLiteral(useLocaleImportPath)
+				)
+			);
 			
-			generateVirtualModules()
 			const output = generate(ast, {}, code);
 			return output;
 		},
 
 		// 5) Handle Hot Module Reload
 		async handleHotUpdate({ file, server, modules }) {
-			if (!file.endsWith('.tsx') || !filter(file)) {
+			if (!filter(file)) {
 				return;
 			}
 
 			context.version++;
+			await generateLocalesModules(file);
 
 			const invalidatedModules = [...modules];
 			for (const modId of Object.keys(virtualModules)) {
@@ -773,13 +763,4 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 			return invalidatedModules
 		}
 	};
-}
-
-function consoleLog(...expr: t.Expression[]) {
-	return t.expressionStatement(
-		t.callExpression(
-			t.memberExpression(t.identifier('console'), t.identifier('log')),
-			expr
-		)
-	)
 }
