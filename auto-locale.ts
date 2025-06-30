@@ -158,7 +158,34 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
 							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value.expression });
 						} else {
-							console.error(attr.value)
+							console.error('invalid expression', attr.value)
+						}
+					});
+				},
+				CallExpression(nodePath) {
+					if (!t.isIdentifier(nodePath.node.callee, { name: hookHelper })) {
+						return;
+					}
+
+					if (!t.isObjectExpression(nodePath.node.arguments[0])) {
+						return;
+					}
+
+					const [componentBase, key] = componentKey(id, translationCount++);
+
+					nodePath.node.arguments[0].properties.forEach(prop => {
+						if (!t.isObjectProperty(prop) || !t.isIdentifier(prop.key)) {
+							return;
+						}
+
+						if (!locales.includes(prop.key.name)) {
+							return;
+						}
+
+						if (t.isExpression(prop.value)) {
+							context.translations.get(prop.key.name)!.set(componentBase, { key, value: prop.value });
+						} else {
+							console.error('invalid expression', prop.value);
 						}
 					});
 				}
@@ -294,25 +321,24 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const compName = `${componentPrefix}_${key}`
 
-					const componentsImports = locales
-						.map(locale => {
-							const compId = t.identifier(`${compName}_${locale}`)
+					const componentsImports = locales.map(locale => {
+						const compId = t.identifier(`${compName}_${locale}`)
 
-							if (locale === defaultLocale) {
-								return t.importDeclaration(
-									[t.importSpecifier(compId, t.identifier(key))],
-									localesModuleId(locale)
-								)
-							}
-
-							return t.variableDeclaration(
-								"const",
-								[t.variableDeclarator(
-									compId,
-									importCall(locale)
-								)]
+						if (locale === defaultLocale) {
+							return t.importDeclaration(
+								[t.importSpecifier(compId, t.identifier(key))],
+								localesModuleId(locale)
 							)
-						})
+						}
+
+						return t.variableDeclaration(
+							"const",
+							[t.variableDeclarator(
+								compId,
+								importCall(locale)
+							)]
+						)
+					})
 
 					const mapId = t.identifier('Map')
 					const mapDecl = t.variableDeclaration('const', [
@@ -460,7 +486,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					modified = true;
 				},
-				/* CallExpression(nodePath) {
+				CallExpression(nodePath) {
 					if (!t.isIdentifier(nodePath.node.callee)) {
 						return;
 					}
@@ -519,31 +545,13 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						return;
 					}
 
-					return;
-
 					const [componentBase, key] = componentKey(id, translationCount++);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
-
-					nodePath.node.arguments[0].properties.forEach(prop => {
-						if (!t.isObjectProperty(prop) || !t.isIdentifier(prop.key)) {
-							return;
-						}
-
-						if (!locales.includes(prop.key.name)) {
-							return;
-						}
-
-						if (t.isExpression(prop.value)) {
-							translations.get(prop.key.name)!.set(componentBase, { key, expr: prop.value });
-						} else {
-							console.error('invalid', prop.value);
-						}
-					});
 					
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
 							t.import(),
-							[virtualModuleId(locale)]
+							[localesModuleId(locale)]
 						)
 
 						const importWithThenDecl = t.callExpression(
@@ -555,8 +563,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 										t.returnStatement(
 											t.memberExpression(
 												t.identifier('module'),
-												t.stringLiteral(key),
-												true
+												t.identifier(key)
 											)
 										)
 									])
@@ -572,46 +579,19 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const hookName = `${hookPrefix}_${key}`;
 
-					const defaultExpr = translations.get(defaultLocale)!.get(componentBase)?.expr;
-					const defaultHookDecl = t.isArrowFunctionExpression(defaultExpr) || t.isFunctionExpression(defaultExpr)
-						? t.variableDeclaration(
-							'const',
-							[t.variableDeclarator(
-								defaultHookId,
-								defaultExpr
-							)]
-						)
-						: t.variableDeclaration(
-							'const',
-							[t.variableDeclarator(
-								defaultHookId,
-								t.arrowFunctionExpression(
-									[],
-									defaultExpr ?? t.identifier('undefined')
-								)
-							)]
-						)
+					const hooksImports = locales.map(locale => {
+						const hookId = t.identifier(`${hookName}_${locale}`)
 
-					const asyncHooksDecls = locales.map(locale => {
 						if (locale === defaultLocale) {
-							return t.variableDeclaration(
-								"const",
-								[t.variableDeclarator(
-									t.identifier(`${hookName}_${locale}`),
-									t.arrowFunctionExpression(
-										[],
-										t.callExpression(
-											t.memberExpression(t.identifier('Promise'), t.identifier('resolve')),
-											[defaultHookId]
-										)
-									)
-								)]
+							return t.importDeclaration(
+								[t.importSpecifier(hookId, t.identifier(key))],
+								localesModuleId(locale)
 							)
 						} else {
 							return t.variableDeclaration(
 								"const",
 								[t.variableDeclarator(
-									t.identifier(`${hookName}_${locale}`),
+									hookId,
 									importCall(locale)
 								)]
 							)
@@ -623,12 +603,10 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						t.variableDeclarator(
 							mapId,
 							t.objectExpression(
-								locales.map(locale =>
-									t.objectProperty(
-										t.identifier(locale),
-										t.identifier(`${hookName}_${locale}`)
-									)
-								)
+								locales.map(locale => t.objectProperty(
+									t.identifier(locale),
+									t.identifier(`${hookName}_${locale}`)
+								))
 							)
 						)
 					]);
@@ -650,7 +628,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						t.callExpression(
 							t.memberExpression(reactImportAlias, t.identifier('useState')),
 							[t.callExpression(
-								defaultHookId,
+								t.memberExpression(mapId, localeId, true),
 								propsId ? [propsId] : []
 							)]
 						)
@@ -674,22 +652,31 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 								[],
 								t.blockStatement([
 									selectedDecl,
-									t.expressionStatement(
-										t.callExpression(
-											t.memberExpression(
-												t.callExpression(selectedId, []),
-												t.identifier('then')
-											),
-											[t.arrowFunctionExpression(
-												[t.identifier('f')],
-												t.callExpression(
-													setResultId,
-													[t.callExpression(
-														t.identifier('f'),
-														propsId ? [propsId] : []
-													)]
-												)
-											)]
+									t.ifStatement(
+										t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)),
+										t.expressionStatement(
+											t.callExpression(
+												setResultId,
+												[selectedId]
+											)
+										),
+										t.expressionStatement(
+											t.callExpression(
+												t.memberExpression(
+													t.callExpression(selectedId, []),
+													t.identifier('then')
+												),
+												[t.arrowFunctionExpression(
+													[t.identifier('f')],
+													t.callExpression(
+														setResultId,
+														[t.callExpression(
+															t.identifier('f'),
+															propsId ? [propsId] : []
+														)]
+													)
+												)]
+											)
 										)
 									)
 								])
@@ -713,8 +700,8 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 						])
 					)
 
-					ast.program.body.unshift(functionDecl)
-					ast.program.body.unshift(...asyncHooksDecls)
+					nodePath.getFunctionParent()!.insertBefore(hooksImports)
+					nodePath.getFunctionParent()!.insertBefore(functionDecl)
 
 					nodePath.replaceWith(
 						t.callExpression(
@@ -722,8 +709,9 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							argAttr ? [argAttr] : []
 						)
 					);
+
 					modified = true;
-				} */
+				}
 			});
 			
 			if (!modified) {
