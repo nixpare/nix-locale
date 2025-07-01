@@ -33,7 +33,7 @@
     }
   },
   "bin": {
-    "@nixpare/nix-locale": "./dist/index.js"
+    "nix-locale": "dist/index.js"
   },
   "files": [
     "dist",
