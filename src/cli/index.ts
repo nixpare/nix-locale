@@ -28,17 +28,25 @@ const importPath = (await inquirer.prompt([
 	},
 ])).importPath
 
-const templatePath = path.resolve(__dirname, '../src/templates/helper.tpl.tsx')
-const helperModulePath = `${helperModuleDir}/helper.tsx`
+const jsTemplatePath = path.resolve(__dirname, '../src/templates/helper.tpl.js')
+const jsHelperModulePath = `${helperModuleDir}/helper.js`
+
+const typesTemplatePath = path.resolve(__dirname, '../src/templates/helper.tpl.d.ts')
+const typesHelperModulePath = `${helperModuleDir}/helper.d.ts`
 
 if (!fs.existsSync(helperModuleDir)) {
 	fs.mkdirSync(helperModuleDir, { recursive: true })
 }
 
-let template = fs.readFileSync(templatePath, 'utf8')
+let template = fs.readFileSync(jsTemplatePath, 'utf8')
 template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
 
-fs.writeFileSync(helperModulePath, template, 'utf8');
+fs.writeFileSync(jsHelperModulePath, template, 'utf8');
+
+template = fs.readFileSync(typesTemplatePath, 'utf8')
+template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
+
+fs.writeFileSync(typesHelperModulePath, template, 'utf8');
 
 // Log a success message to the console
-console.log(`✅ Helper file successfully created at ${helperModulePath}`);
+console.log(`✅ Helper file successfully created at ${jsHelperModulePath}`);
