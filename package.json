@@ -1,6 +1,6 @@
 {
   "name": "@nixpare/nix-locale",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Handle website localization inline in your React components, without external JSON files and weak translation tags",
   "keywords": [
     "i18n",
