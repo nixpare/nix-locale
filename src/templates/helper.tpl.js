@@ -9,7 +9,7 @@ export function t(locales, arg) {
 	return selected;
 }
 
-export function useT(locales, arg) {
+export function useT(locales, arg, _) {
 	const locale = useLocale();
 	const selected = locales[locale];
 
@@ -21,7 +21,7 @@ export function useT(locales, arg) {
 
 
 export function T(props) {
-	const { arg, ...locales } = props;
+	const { arg, scope: _, ...locales } = props;
 
 	const locale = useLocale();
 	const selected = locales[locale];

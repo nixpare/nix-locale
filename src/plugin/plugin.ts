@@ -45,10 +45,14 @@ export interface NixLocaleOptions {
 	useLocaleImportPath?: string;
 }
 
-type TranslationsMap<T> = Map<string, Map<string, {
+// { key: component_with_version, value: localized_value }
+type TranslationElement<T> = {
 	key: string;
 	value: T;
-}>>
+}
+
+// locale => scope => component_without_version => TranslationElement
+type TranslationsMap<T> = Map<string, Map<string, Map<string, TranslationElement<T>>>>
 
 type ContextType = {
 	version: number
@@ -61,6 +65,17 @@ if (!globalThis.__NIX_LOCALE_STATE__) globalThis.__NIX_LOCALE_STATE__ = {
 	translations: new Map()
 } satisfies ContextType;
 
+const staticHelper = 't';
+const hookHelper = 'useT';
+const componentHelper = 'T';
+const useLocaleName = 'useLocale';
+
+const componentPrefix = "NixLocale"
+const hookPrefix = "useNixLocale"
+const reactImportAlias = t.identifier("NixLocale_React")
+const useLocaleImportAlias = t.identifier("NixLocale_useLocale")
+const virtualModulePrefix = 'virtual:@nixpare/nix-locale'
+
 export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 	let root: string;
 	const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx']
@@ -68,17 +83,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 
 	const locales = options.locales;
 	const defaultLocale = options.default;
-	const staticHelper = 't';
-	const hookHelper = 'useT';
-	const componentHelper = 'T';
-	const useLocaleName = 'useLocale';
 	const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
-
-	const componentPrefix = "NixLocale"
-	const hookPrefix = "useNixLocale"
-	const reactImportAlias = t.identifier("NixLocale_React")
-	const useLocaleImportAlias = t.identifier("NixLocale_useLocale")
-	const virtualModulePrefix = 'virtual:@nixpare/nix-locale'
 
 	const virtualModules: Record<string, GeneratorResult> = {}
 
@@ -89,15 +94,6 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 			context.translations.set(locale, new Map())
 		}
 	});
-
-	const componentKey = (id: string, count: number): [string, string] => {
-		const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
-		const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
-		const componentBase = `${baseName}__${count}`;
-		return [componentBase, `${componentBase}_${context.version}`];
-	}
-
-	const localesModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
 
 	const generateLocalesModules = async (...files: string[]) => {
 		if (files.length == 0) {
@@ -122,25 +118,48 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++);
+					const [componentBase, key] = componentKey(id, translationCount++, context.version);
+
+					// locale => localized_value
+					const translationElements: Record<string, t.Expression> = {}
+					let scope = ''
 
 					nodePath.node.openingElement.attributes.forEach(attr => {
 						if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) {
 							return
 						}
 
-						if (!locales.includes(attr.name.name) || !t.isJSXIdentifier(attr.name)) {
+						if (attr.name.name === 'scope') {
+							if (!t.isStringLiteral(attr.value)) {
+								console.error(`[@nixpare/nix-locale] Error at ${id}:${attr.loc?.start.line ?? 'undefined'} : scope attribute must be a string literal`)
+								return
+							}
+
+							scope = attr.value.value
+							return
+						}
+
+						if (!locales.includes(attr.name.name)) {
 							return
 						}
 
 						if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
-							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value });
+							translationElements[attr.name.name] = attr.value;
 						} else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
-							context.translations.get(attr.name.name)!.set(componentBase, { key, value: attr.value.expression });
+							translationElements[attr.name.name] = attr.value.expression;
 						} else {
-							console.error('invalid expression', attr.value)
+							console.error(`[@nixpare/nix-locale] Error at ${id}:${attr.loc?.start.line ?? 'undefined'} : invalid expression ${attr.value?.type}`)
+							return
 						}
 					});
+
+					Object.entries(translationElements).forEach(([locale, expr]) => {
+						const localeMap = context.translations.get(locale)!
+						if (!localeMap.has(scope)) {
+							localeMap.set(scope, new Map())
+						}
+						localeMap.get(scope)!.set(componentBase, { key, value: expr });
+					})
 				},
 				CallExpression(nodePath) {
 					if (!t.isIdentifier(nodePath.node.callee, { name: hookHelper })) {
@@ -151,7 +170,10 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++);
+					const [componentBase, key] = componentKey(id, translationCount++, context.version);
+
+					// locale => localized_value
+					const translationElements: Record<string, t.Expression> = {}
 
 					nodePath.node.arguments[0].properties.forEach(prop => {
 						if (!t.isObjectProperty(prop) || !t.isIdentifier(prop.key)) {
@@ -163,50 +185,72 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						}
 
 						if (t.isExpression(prop.value)) {
-							context.translations.get(prop.key.name)!.set(componentBase, { key, value: prop.value });
+							translationElements[prop.key.name] = prop.value
 						} else {
-							console.error('invalid expression', prop.value);
+							console.error(`[@nixpare/nix-locale] Error at ${id}:${prop.loc?.start.line ?? 'undefined'} : invalid expression ${prop.value?.type}`)
+							return
 						}
 					});
+
+					let scope = ''
+					const scopeArg = nodePath.node.arguments[2] as typeof nodePath.node.arguments[2] | undefined;
+					if (scopeArg != undefined) {
+						if (!t.isStringLiteral(scopeArg)) {
+							console.error(`[@nixpare/nix-locale] Error at ${id}:${scopeArg.loc?.start.line ?? 'undefined'} : scope argument must be a string literal`)
+							return
+						}
+
+						scope = scopeArg.value
+					}
+
+					Object.entries(translationElements).forEach(([locale, expr]) => {
+						const localeMap = context.translations.get(locale)!
+						if (!localeMap.has(scope)) {
+							localeMap.set(scope, new Map())
+						}
+						localeMap.get(scope)!.set(componentBase, { key, value: expr });
+					})
 				}
 			});
 		}
 
-		context.translations.forEach((map, locale) => {
-			const exports: t.Statement[] = [];
+		context.translations.forEach((localeMap, locale) => {
+			localeMap.forEach((scopeMap, scope) => {
+				const exports: t.Statement[] = [];
 
-			map.forEach(({ key, value: expr }) => {
-				if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
-					exports.push(t.exportNamedDeclaration(
-						t.variableDeclaration(
-							"const",
-							[t.variableDeclarator(
-								t.identifier(key),
-								expr
-							)]
-						)
-					));
-				} else {
-					exports.push(t.exportNamedDeclaration(
-						t.variableDeclaration(
-							"const",
-							[t.variableDeclarator(
-								t.identifier(key),
-								t.arrowFunctionExpression(
-									[],
+				scopeMap.forEach(({ key, value: expr }) => {
+					if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
+						exports.push(t.exportNamedDeclaration(
+							t.variableDeclaration(
+								"const",
+								[t.variableDeclarator(
+									t.identifier(key),
 									expr
-								)
-							)]
-						)
-					));
-				}
+								)]
+							)
+						));
+					} else {
+						exports.push(t.exportNamedDeclaration(
+							t.variableDeclaration(
+								"const",
+								[t.variableDeclarator(
+									t.identifier(key),
+									t.arrowFunctionExpression(
+										[],
+										expr
+									)
+								)]
+							)
+						));
+					}
+				});
+
+				const programNode = t.program(exports, [], "module");
+				const fileNode = t.file(programNode);
+				const module = generate(fileNode);
+
+				virtualModules[localesModuleId(locale, scope).value + '.jsx'] = module
 			});
-
-			const programNode = t.program(exports, [], "module");
-			const fileNode = t.file(programNode);
-			const module = generate(fileNode);
-
-			virtualModules[localesModuleId(locale).value + '.jsx'] = module
 		});
 	}
 
@@ -258,16 +302,20 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [_, key] = componentKey(id, translationCount++);
+					const [_, key] = componentKey(id, translationCount++, context.version);
 
 					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
 						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
 					});
+					const scopeAttr = nodePath.node.openingElement.attributes.find((attr): attr is t.JSXAttribute => {
+						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'scope'
+					});
+					const scope = (scopeAttr && t.isStringLiteral(scopeAttr.value) && scopeAttr.value.value) || ''
 
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
 							t.import(),
-							[localesModuleId(locale)]
+							[localesModuleId(locale, scope)]
 						)
 
 						const importWithThenDecl = t.callExpression(
@@ -307,7 +355,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						if (locale === defaultLocale) {
 							return t.importDeclaration(
 								[t.importSpecifier(compId, t.identifier(key))],
-								localesModuleId(locale)
+								localesModuleId(locale, scope)
 							)
 						}
 
@@ -525,13 +573,24 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++);
+					const [_, key] = componentKey(id, translationCount++, context.version);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
+					
+					let scope = ''
+					const scopeArg = nodePath.node.arguments[2] as typeof nodePath.node.arguments[2] | undefined;
+					if (scopeArg != undefined) {
+						if (!t.isStringLiteral(scopeArg)) {
+							console.error(`[@nixpare/nix-locale] Error at ${id}:${scopeArg.start ?? 'undefined'} : scope argument must be a string literal`)
+							return
+						}
+
+						scope = scopeArg.value
+					}
 
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
 							t.import(),
-							[localesModuleId(locale)]
+							[localesModuleId(locale, scope)]
 						)
 
 						const importWithThenDecl = t.callExpression(
@@ -565,7 +624,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						if (locale === defaultLocale) {
 							return t.importDeclaration(
 								[t.importSpecifier(hookId, t.identifier(key))],
-								localesModuleId(locale)
+								localesModuleId(locale, scope)
 							)
 						} else {
 							return t.variableDeclaration(
@@ -731,4 +790,16 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 			return invalidatedModules
 		}
 	};
+}
+
+function localesModuleId(locale: string, scope: string) {
+	const scopeSuffix = scope === '' ? '' : `-${scope}`
+	return t.stringLiteral(`${virtualModulePrefix}/${locale}/${locale}${scopeSuffix}`)
+}
+
+function componentKey(id: string, count: number, version: number): [string, string] {
+	const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '')
+	const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
+	const componentBase = `${baseName}__${count}`;
+	return [componentBase, `${componentBase}_${version}`];
 }

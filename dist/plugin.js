@@ -15,22 +15,22 @@ if (!globalThis.__NIX_LOCALE_STATE__)
         version: 0,
         translations: new Map()
     };
+const staticHelper = 't';
+const hookHelper = 'useT';
+const componentHelper = 'T';
+const useLocaleName = 'useLocale';
+const componentPrefix = "NixLocale";
+const hookPrefix = "useNixLocale";
+const reactImportAlias = t.identifier("NixLocale_React");
+const useLocaleImportAlias = t.identifier("NixLocale_useLocale");
+const virtualModulePrefix = 'virtual:@nixpare/nix-locale';
 export default function nixLocalePlugin(options) {
     let root;
     const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'];
     const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
     const locales = options.locales;
     const defaultLocale = options.default;
-    const staticHelper = 't';
-    const hookHelper = 'useT';
-    const componentHelper = 'T';
-    const useLocaleName = 'useLocale';
     const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
-    const componentPrefix = "NixLocale";
-    const hookPrefix = "useNixLocale";
-    const reactImportAlias = t.identifier("NixLocale_React");
-    const useLocaleImportAlias = t.identifier("NixLocale_useLocale");
-    const virtualModulePrefix = 'virtual:@nixpare/nix-locale';
     const virtualModules = {};
     // @ts-ignore
     const context = globalThis.__NIX_LOCALE_STATE__;
@@ -39,13 +39,6 @@ export default function nixLocalePlugin(options) {
             context.translations.set(locale, new Map());
         }
     });
-    const componentKey = (id, count) => {
-        const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '');
-        const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
-        const componentBase = `${baseName}__${count}`;
-        return [componentBase, `${componentBase}_${context.version}`];
-    };
-    const localesModuleId = (locale) => t.stringLiteral(`${virtualModulePrefix}/${locale}`);
     const generateLocalesModules = async (...files) => {
         if (files.length == 0) {
             files = await fg(includeOption, { cwd: root, absolute: true });
@@ -65,23 +58,42 @@ export default function nixLocalePlugin(options) {
                     if (!t.isJSXIdentifier(nodePath.node.openingElement.name, { name: componentHelper })) {
                         return;
                     }
-                    const [componentBase, key] = componentKey(id, translationCount++);
+                    const [componentBase, key] = componentKey(id, translationCount++, context.version);
+                    // locale => localized_value
+                    const translationElements = {};
+                    let scope = '';
                     nodePath.node.openingElement.attributes.forEach(attr => {
                         if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) {
                             return;
                         }
-                        if (!locales.includes(attr.name.name) || !t.isJSXIdentifier(attr.name)) {
+                        if (attr.name.name === 'scope') {
+                            if (!t.isStringLiteral(attr.value)) {
+                                console.error(`[@nixpare/nix-locale] Error at ${id}:${attr.loc?.start.line ?? 'undefined'} : scope attribute must be a string literal`);
+                                return;
+                            }
+                            scope = attr.value.value;
+                            return;
+                        }
+                        if (!locales.includes(attr.name.name)) {
                             return;
                         }
                         if (t.isStringLiteral(attr.value) || t.isJSXElement(attr.value) || t.isJSXFragment(attr.value)) {
-                            context.translations.get(attr.name.name).set(componentBase, { key, value: attr.value });
+                            translationElements[attr.name.name] = attr.value;
                         }
                         else if (t.isJSXExpressionContainer(attr.value) && !t.isJSXEmptyExpression(attr.value.expression)) {
-                            context.translations.get(attr.name.name).set(componentBase, { key, value: attr.value.expression });
+                            translationElements[attr.name.name] = attr.value.expression;
                         }
                         else {
-                            console.error('invalid expression', attr.value);
+                            console.error(`[@nixpare/nix-locale] Error at ${id}:${attr.loc?.start.line ?? 'undefined'} : invalid expression ${attr.value?.type}`);
+                            return;
                         }
+                    });
+                    Object.entries(translationElements).forEach(([locale, expr]) => {
+                        const localeMap = context.translations.get(locale);
+                        if (!localeMap.has(scope)) {
+                            localeMap.set(scope, new Map());
+                        }
+                        localeMap.get(scope).set(componentBase, { key, value: expr });
                     });
                 },
                 CallExpression(nodePath) {
@@ -91,7 +103,9 @@ export default function nixLocalePlugin(options) {
                     if (!t.isObjectExpression(nodePath.node.arguments[0])) {
                         return;
                     }
-                    const [componentBase, key] = componentKey(id, translationCount++);
+                    const [componentBase, key] = componentKey(id, translationCount++, context.version);
+                    // locale => localized_value
+                    const translationElements = {};
                     nodePath.node.arguments[0].properties.forEach(prop => {
                         if (!t.isObjectProperty(prop) || !t.isIdentifier(prop.key)) {
                             return;
@@ -100,29 +114,48 @@ export default function nixLocalePlugin(options) {
                             return;
                         }
                         if (t.isExpression(prop.value)) {
-                            context.translations.get(prop.key.name).set(componentBase, { key, value: prop.value });
+                            translationElements[prop.key.name] = prop.value;
                         }
                         else {
-                            console.error('invalid expression', prop.value);
+                            console.error(`[@nixpare/nix-locale] Error at ${id}:${prop.loc?.start.line ?? 'undefined'} : invalid expression ${prop.value?.type}`);
+                            return;
                         }
+                    });
+                    let scope = '';
+                    const scopeArg = nodePath.node.arguments[2];
+                    if (scopeArg != undefined) {
+                        if (!t.isStringLiteral(scopeArg)) {
+                            console.error(`[@nixpare/nix-locale] Error at ${id}:${scopeArg.loc?.start.line ?? 'undefined'} : scope argument must be a string literal`);
+                            return;
+                        }
+                        scope = scopeArg.value;
+                    }
+                    Object.entries(translationElements).forEach(([locale, expr]) => {
+                        const localeMap = context.translations.get(locale);
+                        if (!localeMap.has(scope)) {
+                            localeMap.set(scope, new Map());
+                        }
+                        localeMap.get(scope).set(componentBase, { key, value: expr });
                     });
                 }
             });
         }
-        context.translations.forEach((map, locale) => {
-            const exports = [];
-            map.forEach(({ key, value: expr }) => {
-                if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
-                    exports.push(t.exportNamedDeclaration(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(key), expr)])));
-                }
-                else {
-                    exports.push(t.exportNamedDeclaration(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(key), t.arrowFunctionExpression([], expr))])));
-                }
+        context.translations.forEach((localeMap, locale) => {
+            localeMap.forEach((scopeMap, scope) => {
+                const exports = [];
+                scopeMap.forEach(({ key, value: expr }) => {
+                    if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
+                        exports.push(t.exportNamedDeclaration(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(key), expr)])));
+                    }
+                    else {
+                        exports.push(t.exportNamedDeclaration(t.variableDeclaration("const", [t.variableDeclarator(t.identifier(key), t.arrowFunctionExpression([], expr))])));
+                    }
+                });
+                const programNode = t.program(exports, [], "module");
+                const fileNode = t.file(programNode);
+                const module = generate(fileNode);
+                virtualModules[localesModuleId(locale, scope).value + '.jsx'] = module;
             });
-            const programNode = t.program(exports, [], "module");
-            const fileNode = t.file(programNode);
-            const module = generate(fileNode);
-            virtualModules[localesModuleId(locale).value + '.jsx'] = module;
         });
     };
     return {
@@ -164,12 +197,16 @@ export default function nixLocalePlugin(options) {
                     if (!t.isJSXIdentifier(nodePath.node.openingElement.name, { name: componentHelper })) {
                         return;
                     }
-                    const [_, key] = componentKey(id, translationCount++);
+                    const [_, key] = componentKey(id, translationCount++, context.version);
                     const argAttr = nodePath.node.openingElement.attributes.find(attr => {
                         return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg';
                     });
+                    const scopeAttr = nodePath.node.openingElement.attributes.find((attr) => {
+                        return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'scope';
+                    });
+                    const scope = (scopeAttr && t.isStringLiteral(scopeAttr.value) && scopeAttr.value.value) || '';
                     const importCall = (locale) => {
-                        const importDecl = t.callExpression(t.import(), [localesModuleId(locale)]);
+                        const importDecl = t.callExpression(t.import(), [localesModuleId(locale, scope)]);
                         const importWithThenDecl = t.callExpression(t.memberExpression(importDecl, t.identifier('then')), [
                             t.arrowFunctionExpression([t.identifier('module')], t.parenthesizedExpression(t.objectExpression([
                                 t.objectProperty(t.identifier('default'), t.memberExpression(t.identifier('module'), t.identifier(key)))
@@ -181,7 +218,7 @@ export default function nixLocalePlugin(options) {
                     const componentsImports = locales.map(locale => {
                         const compId = t.identifier(`${compName}_${locale}`);
                         if (locale === defaultLocale) {
-                            return t.importDeclaration([t.importSpecifier(compId, t.identifier(key))], localesModuleId(locale));
+                            return t.importDeclaration([t.importSpecifier(compId, t.identifier(key))], localesModuleId(locale, scope));
                         }
                         return t.variableDeclaration("const", [t.variableDeclarator(compId, importCall(locale))]);
                     });
@@ -269,10 +306,19 @@ export default function nixLocalePlugin(options) {
                     if (!t.isObjectExpression(nodePath.node.arguments[0])) {
                         return;
                     }
-                    const [componentBase, key] = componentKey(id, translationCount++);
+                    const [_, key] = componentKey(id, translationCount++, context.version);
                     const argAttr = nodePath.node.arguments[1];
+                    let scope = '';
+                    const scopeArg = nodePath.node.arguments[2];
+                    if (scopeArg != undefined) {
+                        if (!t.isStringLiteral(scopeArg)) {
+                            console.error(`[@nixpare/nix-locale] Error at ${id}:${scopeArg.start ?? 'undefined'} : scope argument must be a string literal`);
+                            return;
+                        }
+                        scope = scopeArg.value;
+                    }
                     const importCall = (locale) => {
-                        const importDecl = t.callExpression(t.import(), [localesModuleId(locale)]);
+                        const importDecl = t.callExpression(t.import(), [localesModuleId(locale, scope)]);
                         const importWithThenDecl = t.callExpression(t.memberExpression(importDecl, t.identifier('then')), [
                             t.arrowFunctionExpression([t.identifier('module')], t.blockStatement([
                                 t.returnStatement(t.memberExpression(t.identifier('module'), t.identifier(key)))
@@ -284,7 +330,7 @@ export default function nixLocalePlugin(options) {
                     const hooksImports = locales.map(locale => {
                         const hookId = t.identifier(`${hookName}_${locale}`);
                         if (locale === defaultLocale) {
-                            return t.importDeclaration([t.importSpecifier(hookId, t.identifier(key))], localesModuleId(locale));
+                            return t.importDeclaration([t.importSpecifier(hookId, t.identifier(key))], localesModuleId(locale, scope));
                         }
                         else {
                             return t.variableDeclaration("const", [t.variableDeclarator(hookId, importCall(locale))]);
@@ -350,4 +396,14 @@ export default function nixLocalePlugin(options) {
             return invalidatedModules;
         }
     };
+}
+function localesModuleId(locale, scope) {
+    const scopeSuffix = scope === '' ? '' : `-${scope}`;
+    return t.stringLiteral(`${virtualModulePrefix}/${locale}/${locale}${scopeSuffix}`);
+}
+function componentKey(id, count, version) {
+    const relativeDir = path.relative(__dirname, id).replaceAll('\\', '/').replaceAll('../', '');
+    const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
+    const componentBase = `${baseName}__${count}`;
+    return [componentBase, `${componentBase}_${version}`];
 }

@@ -12,12 +12,10 @@ Instead, this plugin wants to make very difficoult to mess things up and keep ev
 
 This is what a `@nixpare/nix-locale` code looks like (from the example from [react-i18next](https://www.npmjs.com/package/react-i18next)):
 ```jsx
-<div>
-  <T
-    en={<>Just simple content</>}
-    it="Solo un semplice componente"
-  >
-</div>
+<T
+  en={<>Just simple content</>}
+  it="Solo un semplice componente"
+>
 <T
   en={arg => <>
     Hello <strong title="This is your name">{arg.name}</strong>, you have {arg.count} unread messages. <Link to="/msgs">Go to messages</Link>.
@@ -26,6 +24,11 @@ This is what a `@nixpare/nix-locale` code looks like (from the example from [rea
     Ciao <strong title="Questo è il tuo nome">{name}</strong>, hai {count} messaggi non letti. <Link to="/msgs">Vai ai messaggi</Link>.
   </>}
   arg={{ name: 'My Name', count: 10 }}
+>
+<T
+  en={<>Just simple content of a specific page</>}
+  it={<>Solo un semplice componente di una pagina specifica</>}
+  scope="specific-page"
 >
 ```
 This code is completely type safe and prevents every possible runtime error, like missing translations! All of this is done through the generation of a set of helper function and components in your project via the command `npx @nixpare/nix-locale`. More details below.
@@ -39,7 +42,9 @@ Let me show what this code is actually hiding:
   
 + This types of parameters can be mixed together, but if one of those is a function which takes an argument, this argument must be defined in the `T` component under the `arg` parameter (see the code above). The types are automatically infered from this parameter, so everything is type safe.
 
-+ During the **build step**, by leveraging *virtual modules and tranformations*, it automatically separates translations in different files, one for each language, preloads the default language and when the user decides to change the language, it automatically fetches the corresponding new language translations and applies them when available. All of this **DOES NOT CHANGE YOUR PROJECT ON DISK**, it's all done in memory at build time.
++ You can also use the `scope` paramenter in order to separate the translations at build time, useful if the translations payload increases along with the project size, in order to reduce page loading times. This is similar to **namespaces** from `i18next`.
+
++ During the **build step**, by leveraging *virtual modules and tranformations*, it automatically separates translations in different files, one for each language and one for each scope, preloads the default language and when the user decides to change the language, it automatically fetches the corresponding new language translations and applies them when available. All of this **DOES NOT CHANGE YOUR PROJECT ON DISK**, it's all done in memory at build time.
 
 This plugin also exposes other two helper functions:
  + `useT`, which has the same principle behind the `T` component, but is used as an hook, so it can return any value, not only `React.ReactNode`. (**IMPORTANT**: this is not a magic wand, **this is a real hook**, and so you have to use it following the react guidelines, see [Rules of Hooks - React.dev](https://react.dev/reference/rules/rules-of-hooks))
@@ -56,6 +61,12 @@ This plugin also exposes other two helper functions:
      ```js
      export type LocaleType = 'en' | 'it' | 'de' | ...
      ```
+  
+   + `LocaleScopes`: this is a `type union` which lists all the project scopes you want to use, used just to provide code linting, e.g.:
+     ```js
+     export type LocaleScopes = '' | 'index' | 'about' | 'products' | ...
+     ```
+     The `empty` string is equivalent to not providing a scope, and this should be used for common parts like navigation menu components, footer elements and others.
    
    + `DEFAULT_LOCALE`: this is a `constant` value which tells the default loaded function (also used by the `t` helper function), e.g.:
      ```js
