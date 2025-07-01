@@ -74,7 +74,7 @@ This plugin also exposes other two helper functions:
    npx @nixpare/nix-locale
    ```
    This command will ask you where is your project directory (the default is `src`) and the import path the module created the step before (e.g. `src/hooks/locale` if the file created before was in `./src/hooks/locale.ts`).
-   This will create a file under `src/nix-locale/helper.tsx` where all the helper functions will be available.
+   This will create a file under `src/nix-locale/helper.js` where all the helper functions will be available (and all the type definitions).
 
 4) And finally, include the plugin in your vite config file:
    ```js
