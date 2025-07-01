@@ -76,4 +76,32 @@ This plugin also exposes other two helper functions:
    This command will ask you where is your project directory (the default is `src`) and the import path the module created the step before (e.g. `src/hooks/locale` if the file created before was in `./src/hooks/locale.ts`).
    This will create a file under `src/nix-locale/helper.tsx` where all the helper functions will be available.
 
+4) And finally, include the plugin in your vite config file:
+   ```js
+   import nixLocale from "@nixpare/nix-locale/plugin";
+
+   export default defineConfig({
+     plugins: [
+       // Other plugins ...
+       nixLocale({
+         include: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'],
+         exclude: 'node_modules/**/*',
+         locales: ["en", "it"],
+         default: "en",
+         useLocaleImportPath: 'src/hooks/locale'
+       })
+     ],
+     // Other config entries ...
+   })
+   ```
+   A few considerations:
+   + `include` (optional) : a pattern or list of patterns, used to determine what files should be parsed. In the example above are shown the default values, but if you know exactly what files are using those, you can reduce build times by narrowing down (e.g. if you know only .tsx file are referencing the helper, and all files are in your `src` folder, you can `include: 'src/**/*.tsx`).
+   + `exclude` (optional) : the opposite of `include`. In the example above is shown the default value, be careful while changing it to the inclusion of huge folders like `node_modules/`.
+   + `locales` : a list of languages to parse, this should match the `type LocaleType` exported above.
+   + `default` : the default language, taken from the list above, this should match `const DEFAULT_LOCALE` exported above.
+   + `useLocaleImportPath` (optional) : the import path matching the one given while generating the helper module. In the example above is shown the default value.
+
 **NOW YOU ARE READY TO GO**
+
+### Disabling the plugin if errors are found
+If you ever encountered a problem while working with this plugin, you can always disable it by removing it from the vite config. If you do this, everything will continue working as normal, because the helper function will not be replaced during the build steps, and this functions are just normal components (they are not using anthing fancy like `React.lazy`, `React.Suspense` or **dynamic imports**).
