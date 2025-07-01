@@ -20,6 +20,9 @@
     "type": "git",
     "url": "git+https://github.com/nixpare/nix-locale.git"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "author": "Nixpare",
   "type": "module",
