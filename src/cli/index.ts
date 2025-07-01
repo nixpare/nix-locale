@@ -12,7 +12,7 @@ const projectRoot = (await inquirer.prompt([
 	{
 		type: 'input',
 		name: 'projectRoot',
-		message: `Project root`,
+		message: `Project root:`,
 		default: 'src'
 	},
 ])).projectRoot
@@ -23,30 +23,52 @@ const importPath = (await inquirer.prompt([
 	{
 		type: 'input',
 		name: 'importPath',
-		message: `Import path for exported locale defininitions (import { DEFAULT_LOCALE, useLocale, type LocaleType })`,
+		message: `Import path for exported locale defininitions:`,
 		default: `${projectRoot}/hooks/locale`
 	},
 ])).importPath
 
-const jsTemplatePath = path.resolve(__dirname, '../src/templates/helper.tpl.js')
-const jsHelperModulePath = `${helperModuleDir}/helper.js`
+const templatePathPrefix = '../src/templates/helper.tpl'
+const helperModulePathPrefix = `${helperModuleDir}/helper`
 
-const typesTemplatePath = path.resolve(__dirname, '../src/templates/helper.tpl.d.ts')
-const typesHelperModulePath = `${helperModuleDir}/helper.d.ts`
+const tsTemplatePath = path.resolve(__dirname, `${templatePathPrefix}.ts`)
+const tsHelperModulePath = `${helperModulePathPrefix}.ts`
+
+const jsTemplatePath = path.resolve(__dirname, `${templatePathPrefix}.js`)
+const jsHelperModulePath = `${helperModulePathPrefix}.js`
+
+const typesTemplatePath = path.resolve(__dirname, `${templatePathPrefix}.d.ts`)
+const typesHelperModulePath = `${helperModulePathPrefix}.d.ts`
 
 if (!fs.existsSync(helperModuleDir)) {
 	fs.mkdirSync(helperModuleDir, { recursive: true })
 }
 
-let template = fs.readFileSync(jsTemplatePath, 'utf8')
-template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
+const isTS = (await inquirer.prompt([
+	{
+		type: 'list',
+		name: 'isTS',
+		message: `Choose language:`,
+		choices: ['TypeScript', 'JavaScript']
+	},
+])).isTS === 'TypeScript'
 
-fs.writeFileSync(jsHelperModulePath, template, 'utf8');
+if (isTS) {
+	let template = fs.readFileSync(tsTemplatePath, 'utf8')
+	template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
 
-template = fs.readFileSync(typesTemplatePath, 'utf8')
-template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
+	fs.writeFileSync(tsHelperModulePath, template, 'utf8');
+} else {
+	let template = fs.readFileSync(jsTemplatePath, 'utf8')
+	template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
 
-fs.writeFileSync(typesHelperModulePath, template, 'utf8');
+	fs.writeFileSync(jsHelperModulePath, template, 'utf8');
+
+	template = fs.readFileSync(typesTemplatePath, 'utf8')
+	template = template.replace('__LOCALE_IMPORT_PATH__', importPath)
+
+	fs.writeFileSync(typesHelperModulePath, template, 'utf8');
+}
 
 // Log a success message to the console
 console.log(`✅ Helper file successfully created at ${jsHelperModulePath}`);
