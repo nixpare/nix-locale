@@ -13,19 +13,19 @@ Instead, this plugin wants to make very difficoult to mess things up and keep ev
 This is what a `@nixpare/nix-locale` code looks like (from the example from [react-i18next](https://www.npmjs.com/package/react-i18next)):
 ```jsx
 <div>
-	<T
-		en={<>Just simple content</>}
-		it="Solo un semplice componente"
-	>
+  <T
+    en={<>Just simple content</>}
+    it="Solo un semplice componente"
+  >
 </div>
 <T
-	en={arg => <>
-		Hello <strong title="This is your name">{arg.name}</strong>, you have {arg.count} unread messages. <Link to="/msgs">Go to messages</Link>.
-	</>}
-	it={({ name, count }) => <>
-		Ciao <strong title="Questo è il tuo nome">{name}</strong>, hai {count} messaggi non letti. <Link to="/msgs">Vai ai messaggi</Link>.
-	</>}
-	arg={{ name: 'My Name', count: 10 }}
+  en={arg => <>
+    Hello <strong title="This is your name">{arg.name}</strong>, you have {arg.count} unread messages. <Link to="/msgs">Go to messages</Link>.
+  </>}
+  it={({ name, count }) => <>
+    Ciao <strong title="Questo è il tuo nome">{name}</strong>, hai {count} messaggi non letti. <Link to="/msgs">Vai ai messaggi</Link>.
+  </>}
+  arg={{ name: 'My Name', count: 10 }}
 >
 ```
 This code is completely type safe and prevents every possible runtime error, like missing translations! All of this is done through the generation of a set of helper function and components in your project via the command `npx @nixpare/nix-locale`. More details below.
@@ -65,8 +65,8 @@ This plugin also exposes other two helper functions:
    + `useLocale`: this can be a `simple function` (for early testing) or a `full react hook`, it must return the current language, e.g.:
      ```js
      export function useLocale(): LocaleType {
-   	 	const localeContext = React.useContext(LocaleContext) // LocaleContext must be created and implemented by yourself
-   	 	return localeContext
+        const localeContext = React.useContext(LocaleContext) // LocaleContext must be created and implemented by yourself
+        return localeContext
      }
      ```
 3) After creating this module, you have to generate the helper module to use all the functions in your project:
