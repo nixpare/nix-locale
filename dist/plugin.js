@@ -10,12 +10,12 @@ import fg from 'fast-glob';
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // @ts-ignore
-if (!globalThis.__AUTO_LOCALE_STATE__)
-    globalThis.__AUTO_LOCALE_STATE__ = {
+if (!globalThis.__NIX_LOCALE_STATE__)
+    globalThis.__NIX_LOCALE_STATE__ = {
         version: 0,
         translations: new Map()
     };
-export default function autoLocalePlugin(options) {
+export default function nixLocalePlugin(options) {
     let root;
     const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'];
     const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
@@ -26,13 +26,14 @@ export default function autoLocalePlugin(options) {
     const componentHelper = 'T';
     const useLocaleName = 'useLocale';
     const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
-    const componentPrefix = "AutoLocale";
-    const hookPrefix = "useAutoLocale";
-    const reactImportAlias = t.identifier("AutoLocale_React");
-    const useLocaleImportAlias = t.identifier("AutoLocale_useLocale");
+    const componentPrefix = "NixLocale";
+    const hookPrefix = "useNixLocale";
+    const reactImportAlias = t.identifier("NixLocale_React");
+    const useLocaleImportAlias = t.identifier("NixLocale_useLocale");
+    const virtualModulePrefix = 'virtual:@nixpare/nix-locale';
     const virtualModules = {};
     // @ts-ignore
-    const context = globalThis.__AUTO_LOCALE_STATE__;
+    const context = globalThis.__NIX_LOCALE_STATE__;
     locales.forEach(locale => {
         if (!context.translations.has(locale)) {
             context.translations.set(locale, new Map());
@@ -44,7 +45,6 @@ export default function autoLocalePlugin(options) {
         const componentBase = `${baseName}__${count}`;
         return [componentBase, `${componentBase}_${context.version}`];
     };
-    const virtualModulePrefix = 'virtual:auto-locale';
     const localesModuleId = (locale) => t.stringLiteral(`${virtualModulePrefix}/${locale}`);
     const generateLocalesModules = async (...files) => {
         if (files.length == 0) {
@@ -126,7 +126,7 @@ export default function autoLocalePlugin(options) {
         });
     };
     return {
-        name: 'vite-auto-locale',
+        name: 'vite-nix-locale',
         enforce: 'pre',
         configResolved(config) {
             root = config.root;
@@ -202,10 +202,10 @@ export default function autoLocalePlugin(options) {
                         t.arrayExpression([t.identifier('locale')])
                     ]));
                     const selectedDecl = t.variableDeclaration('const', [
-                        t.variableDeclarator(t.identifier('Selected'), t.logicalExpression('||', t.memberExpression(mapId, localeId, true), t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Component not found'))))
+                        t.variableDeclarator(t.identifier('Selected'), t.logicalExpression('||', t.memberExpression(mapId, localeId, true), t.arrowFunctionExpression([], t.stringLiteral('NixLocale error: Component not found'))))
                     ]);
                     const fallbackName = 'Fallback';
-                    const fallbackDecl = t.variableDeclaration('const', [t.variableDeclarator(t.identifier(fallbackName), t.logicalExpression('||', t.memberExpression(t.identifier('Map'), t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')), true), t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Fallback component not found'))))]);
+                    const fallbackDecl = t.variableDeclaration('const', [t.variableDeclarator(t.identifier(fallbackName), t.logicalExpression('||', t.memberExpression(t.identifier('Map'), t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')), true), t.arrowFunctionExpression([], t.stringLiteral('NixLocale error: Fallback component not found'))))]);
                     const propsId = argAttr && t.identifier('props');
                     const returnStmt = t.returnStatement(t.jsxElement(t.jsxOpeningElement(t.jsxMemberExpression(t.jsxIdentifier(reactImportAlias.name), t.jsxIdentifier('Suspense')), [t.jsxAttribute(t.jsxIdentifier('fallback'), t.jsxExpressionContainer(t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier(fallbackName), propsId ? [t.jsxSpreadAttribute(propsId)] : [], true), null, [], true)))], false), t.jsxClosingElement(t.jsxMemberExpression(t.jsxIdentifier(reactImportAlias.name), t.jsxIdentifier('Suspense'))), [
                         t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier('Selected'), propsId ? [t.jsxSpreadAttribute(propsId)] : [], true), null, [], true)

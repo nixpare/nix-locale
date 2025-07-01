@@ -1,5 +1,5 @@
 import { type Plugin } from 'vite';
-export interface AutoLocaleOptions {
+export interface NixLocaleOptions {
     /**
      * Include pattern for filtering the files to be parsed.
      * @default
@@ -31,4 +31,4 @@ export interface AutoLocaleOptions {
      */
     useLocaleImportPath?: string;
 }
-export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin;
+export default function nixLocalePlugin(options: NixLocaleOptions): Plugin;
