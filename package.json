@@ -1,6 +1,6 @@
 {
   "name": "@nixpare/nix-locale",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Handle website localization inline in your React components, without external JSON files and weak translation tags",
   "keywords": [
     "i18n",
@@ -35,7 +35,10 @@
   "bin": {
     "@nixpare/nix-locale": "./dist/index.js"
   },
-  "files": ["dist", "src/templates"],
+  "files": [
+    "dist",
+    "src/templates"
+  ],
   "scripts": {
     "build": "npm run build:cli && npm run build:plugin",
     "build:cli": "tsc -p ./src/cli",
