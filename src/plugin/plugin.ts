@@ -6,7 +6,11 @@ import * as t from '@babel/types';
 import { createFilter } from '@rollup/pluginutils';
 import path from 'path';
 import fs from 'fs';
+import url from 'url';
 import fg from 'fast-glob';
+
+const __filename = url.fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 export interface AutoLocaleOptions {
 	/**
@@ -33,36 +37,12 @@ export interface AutoLocaleOptions {
 	 */
 	default: string;
 	/**
-	 * The static helper function name. This must match the function defined in the helper file.
-	 * @default
-	 * 't'
-	 */
-	staticHelperName?: string
-	/**
-	 * The hook helper function name. This must match the function defined in the helper file.
-	 * @default
-	 * 'useT'
-	 */
-	hookHelperName?: string;
-	/**
-	 * The component helper function name. This must match the function defined in the helper file.
-	 * @default
-	 * 'T'
-	 */
-	componentHelperName?: string;
-	/**
-	 * The name of the hook responsible of signaling any language change. This function used in the hook function
-	 * and component to determine the current language and listen to any changes. Use this property in conjunction with
-	 * the `useLocaleImportPath` option.
-	 * @default
-	 * 'useLocale'
-	 */
-	useLocaleName?: string;
-	/**
 	 * The import path of the hook responsible of signaling any language change. Use this property in conjunction with
 	 * the `useLocaleName` option.
+	 * @default
+	 * 'src/hooks/locale'
 	 */
-	useLocaleImportPath: string;
+	useLocaleImportPath?: string;
 }
 
 type TranslationsMap<T> = Map<string, Map<string, {
@@ -85,14 +65,14 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	let root: string;
 	const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx']
 	const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
-	
+
 	const locales = options.locales;
 	const defaultLocale = options.default;
-	const staticHelper = options.staticHelperName || 't';
-	const hookHelper = options.hookHelperName || 'useT';
-	const componentHelper = options.componentHelperName || 'T';
-	const useLocaleName = options.useLocaleName || 'useLocale';
-	const useLocaleImportPath = options.useLocaleImportPath;
+	const staticHelper = 't';
+	const hookHelper = 'useT';
+	const componentHelper = 'T';
+	const useLocaleName = 'useLocale';
+	const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
 
 	const componentPrefix = "AutoLocale"
 	const hookPrefix = "useAutoLocale"
@@ -100,7 +80,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const useLocaleImportAlias = t.identifier("AutoLocale_useLocale")
 
 	const virtualModules: Record<string, GeneratorResult> = {}
-	
+
 	// @ts-ignore
 	const context = globalThis.__AUTO_LOCALE_STATE__ as ContextType;
 	locales.forEach(locale => {
@@ -123,7 +103,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 		if (files.length == 0) {
 			files = await fg(includeOption, { cwd: root, absolute: true })
 		}
-		
+
 		for (const id of files) {
 			if (!filter(id)) continue
 
@@ -194,8 +174,8 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 		context.translations.forEach((map, locale) => {
 			const exports: t.Statement[] = [];
-			
-			map.forEach(({key, value: expr}) => {
+
+			map.forEach(({ key, value: expr }) => {
 				if (t.isArrowFunctionExpression(expr) || t.isFunctionExpression(expr)) {
 					exports.push(t.exportNamedDeclaration(
 						t.variableDeclaration(
@@ -225,7 +205,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 			const programNode = t.program(exports, [], "module");
 			const fileNode = t.file(programNode);
 			const module = generate(fileNode);
-			
+
 			virtualModules[localesModuleId(locale).value + '.jsx'] = module
 		});
 	}
@@ -467,7 +447,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 							returnStmt
 						])
 					)
-					
+
 					nodePath.getFunctionParent()!.insertBefore(componentsImports)
 					nodePath.getFunctionParent()!.insertBefore(functionDecl)
 
@@ -547,7 +527,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 
 					const [componentBase, key] = componentKey(id, translationCount++);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
-					
+
 					const importCall = (locale: string) => {
 						const importDecl = t.callExpression(
 							t.import(),
@@ -624,7 +604,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					const resultId = t.identifier('result')
 					const setResultId = t.identifier('setResult')
 					const useStateResultDecl = t.variableDeclaration('const', [t.variableDeclarator(
-						t.arrayPattern([ resultId, setResultId ]),
+						t.arrayPattern([resultId, setResultId]),
 						t.callExpression(
 							t.memberExpression(reactImportAlias, t.identifier('useState')),
 							[t.callExpression(
@@ -713,7 +693,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					modified = true;
 				}
 			});
-			
+
 			if (!modified) {
 				return;
 			}
@@ -728,7 +708,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 					t.stringLiteral(useLocaleImportPath)
 				)
 			);
-			
+
 			const output = generate(ast, {}, code);
 			return output;
 		},
@@ -736,7 +716,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 		// 5) Handle Hot Module Reload
 		async handleHotUpdate({ file, server, modules }) {
 			if (!filter(file)) {
-				return;
+				return modules;
 			}
 
 			context.version++;

@@ -1,6 +1,4 @@
-// ADD YOUR CONFIGURATION
-import { useLocale, type LocaleType } from YOUR_LOCALE_PACKAGE;
-const DEFAULT_STATIC_LOCALE: LocaleType = YOUR_DEFAULT_STATIC_LOCALE;
+import { DEFAULT_LOCALE, useLocale, type LocaleType } from '__LOCALE_IMPORT_PATH__';
 
 type TranslationMap<T> = {
 	[L in LocaleType]: T;
@@ -14,7 +12,7 @@ export function t<P, R>(
 	arg: P
 ): R;
 export function t(locales: TranslationMap<any>, arg?: any): any {
-	const selected = locales[DEFAULT_STATIC_LOCALE];
+	const selected = locales[DEFAULT_LOCALE];
 
 	if (typeof selected === 'function') {
 		return selected(arg)

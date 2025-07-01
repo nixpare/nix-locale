@@ -1,0 +1,59 @@
+{
+  "name": "@nixpare/nix-locale",
+  "version": "1.0.0",
+  "description": "Handle website localization inline in your React components, without external JSON files and weak translation tags",
+  "keywords": [
+    "i18n",
+    "i10n",
+    "localization",
+    "translation",
+    "react",
+    "vite",
+    "plugin",
+    "inline"
+  ],
+  "homepage": "https://github.com/nixpare/nix-locale#readme",
+  "bugs": {
+    "url": "https://github.com/nixpare/nix-locale/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nixpare/nix-locale.git"
+  },
+  "license": "MIT",
+  "author": "Nixpare",
+  "type": "module",
+  "exports": {
+    "./plugin": {
+      "import": "./dist/plugin.js",
+      "types": "./dist/plugin.d.ts"
+    }
+  },
+  "bin": {
+    "@nixpare/nix-locale": "./dist/index.js"
+  },
+  "files": ["dist", "src/templates"],
+  "scripts": {
+    "build": "npm run build:cli && npm run build:plugin",
+    "build:cli": "tsc -p ./src/cli",
+    "build:plugin": "tsc -p ./src/plugin",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@babel/parser": "^7.27.7",
+    "@babel/traverse": "^7.27.7",
+    "@babel/types": "^7.27.7",
+    "@rollup/pluginutils": "^5.2.0",
+    "@types/babel__generator": "^7.27.0",
+    "@types/babel__traverse": "^7.20.7",
+    "@types/node": "^24.0.8",
+    "fast-glob": "^3.3.3",
+    "inquirer": "^12.6.3",
+    "typescript": "^5.1.0"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0",
+    "typescript": "^5.1.0"
+  }
+}
