@@ -12,7 +12,7 @@ import fg from 'fast-glob';
 const __filename = url.fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-export interface AutoLocaleOptions {
+export interface NixLocaleOptions {
 	/**
 	 * Include pattern for filtering the files to be parsed.
 	 * @default
@@ -56,12 +56,12 @@ type ContextType = {
 }
 
 // @ts-ignore
-if (!globalThis.__AUTO_LOCALE_STATE__) globalThis.__AUTO_LOCALE_STATE__ = {
+if (!globalThis.__NIX_LOCALE_STATE__) globalThis.__NIX_LOCALE_STATE__ = {
 	version: 0,
 	translations: new Map()
 } satisfies ContextType;
 
-export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
+export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 	let root: string;
 	const includeOption = options.include || ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx']
 	const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
@@ -74,15 +74,16 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	const useLocaleName = 'useLocale';
 	const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
 
-	const componentPrefix = "AutoLocale"
-	const hookPrefix = "useAutoLocale"
-	const reactImportAlias = t.identifier("AutoLocale_React")
-	const useLocaleImportAlias = t.identifier("AutoLocale_useLocale")
+	const componentPrefix = "NixLocale"
+	const hookPrefix = "useNixLocale"
+	const reactImportAlias = t.identifier("NixLocale_React")
+	const useLocaleImportAlias = t.identifier("NixLocale_useLocale")
+	const virtualModulePrefix = 'virtual:@nixpare/nix-locale'
 
 	const virtualModules: Record<string, GeneratorResult> = {}
 
 	// @ts-ignore
-	const context = globalThis.__AUTO_LOCALE_STATE__ as ContextType;
+	const context = globalThis.__NIX_LOCALE_STATE__ as ContextType;
 	locales.forEach(locale => {
 		if (!context.translations.has(locale)) {
 			context.translations.set(locale, new Map())
@@ -96,7 +97,6 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 		return [componentBase, `${componentBase}_${context.version}`];
 	}
 
-	const virtualModulePrefix = 'virtual:auto-locale'
 	const localesModuleId = (locale: string) => t.stringLiteral(`${virtualModulePrefix}/${locale}`)
 
 	const generateLocalesModules = async (...files: string[]) => {
@@ -211,7 +211,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 	}
 
 	return {
-		name: 'vite-auto-locale',
+		name: 'vite-nix-locale',
 		enforce: 'pre',
 
 		configResolved(config) {
@@ -376,7 +376,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 									localeId,
 									true
 								),
-								t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Component not found'))
+								t.arrowFunctionExpression([], t.stringLiteral('NixLocale error: Component not found'))
 							)
 						)
 					]);
@@ -391,7 +391,7 @@ export default function autoLocalePlugin(options: AutoLocaleOptions): Plugin {
 								t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')),
 								true
 							),
-							t.arrowFunctionExpression([], t.stringLiteral('AutoLocale error: Fallback component not found'))
+							t.arrowFunctionExpression([], t.stringLiteral('NixLocale error: Fallback component not found'))
 						)
 					)])
 
