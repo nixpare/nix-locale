@@ -53,7 +53,7 @@ export type TProps<P> = (
 	}
 )
 
-export function T<P>(props: TProps<P>): ReactNode {
+export function T<P extends object>(props: TProps<P>): ReactNode {
 	const { arg, scope: _, ...locales } = props;
 
 	const locale = useLocale();

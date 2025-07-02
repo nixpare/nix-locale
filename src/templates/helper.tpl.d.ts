@@ -36,4 +36,4 @@ export type TProps<P> = (
 	}
 )
 
-export function T<P>(props: TProps<P>): ReactNode;
+export function T<P extends object>(props: TProps<P>): ReactNode;
