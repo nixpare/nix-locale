@@ -6,8 +6,9 @@ export type LocaleScopes = '' | 'foo' | 'bar'
 
 export const DEFAULT_LOCALE: LocaleType = 'it'
 
-export const LocaleContext = createContext<LocaleType>(DEFAULT_LOCALE)
+export const LocaleContext = createContext<{ locale: LocaleType }>({ locale: DEFAULT_LOCALE })
 
 export function useLocale(): LocaleType {
-	return useContext(LocaleContext)
+	const { locale } = useContext(LocaleContext)
+	return locale
 }

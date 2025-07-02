@@ -353,28 +353,22 @@ export default function nixLocalePlugin(options) {
                             t.arrowFunctionExpression([], propsId),
                             t.arrayExpression([propsId])
                         ]))]);
-                    const resultId = t.identifier('result');
-                    const setResultId = t.identifier('setResult');
-                    const useStateResultDecl = t.variableDeclaration('const', [t.variableDeclarator(t.arrayPattern([resultId, setResultId]), t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useState')), [t.callExpression(t.memberExpression(mapId, t.stringLiteral(defaultLocale), true), propsMemoId ? [propsMemoId] : [])]))]);
                     const selectedId = t.identifier('selected');
-                    const selectedDecl = t.variableDeclaration('const', [
-                        t.variableDeclarator(selectedId, t.memberExpression(mapId, localeId, true))
-                    ]);
+                    const useRefSelectedDecl = t.variableDeclaration('const', [t.variableDeclarator(selectedId, t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useRef')), [t.memberExpression(mapId, t.stringLiteral(defaultLocale), true)]))]);
+                    const currentSelectedId = t.memberExpression(selectedId, t.identifier('current'));
                     const useEffectAsyncFetch = t.expressionStatement(t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useEffect')), [
                         t.arrowFunctionExpression([], t.blockStatement([
-                            selectedDecl,
-                            t.ifStatement(t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)), t.expressionStatement(t.callExpression(setResultId, [t.callExpression(selectedId, propsMemoId ? [propsMemoId] : [])])), t.expressionStatement(t.callExpression(t.memberExpression(t.callExpression(selectedId, []), t.identifier('then')), [t.arrowFunctionExpression([t.identifier('f')], t.callExpression(setResultId, [t.callExpression(t.identifier('f'), propsMemoId ? [propsMemoId] : [])]))])))
+                            t.ifStatement(t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)), t.expressionStatement(t.assignmentExpression("=", currentSelectedId, t.memberExpression(mapId, localeId, true))), t.expressionStatement(t.callExpression(t.memberExpression(t.callExpression(t.memberExpression(mapId, localeId, true), []), t.identifier('then')), [t.arrowFunctionExpression([t.identifier('f')], t.assignmentExpression("=", currentSelectedId, t.identifier('f')))])))
                         ])),
-                        t.arrayExpression(propsMemoId ? [localeId, propsMemoId] : [localeId])
+                        t.arrayExpression([localeId])
                     ]));
-                    const returnStmt = t.returnStatement(resultId);
+                    const returnStmt = t.returnStatement(t.callExpression(currentSelectedId, propsId ? [propsId] : []));
                     const hookId = t.identifier(hookName);
                     const functionDecl = t.functionDeclaration(hookId, propsId ? [propsId] : [], t.blockStatement([
                         useLocaleDecl,
-                        t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), [localeId])),
-                        propsMemoDecl || t.emptyStatement(),
                         mapDecl,
-                        useStateResultDecl,
+                        useRefSelectedDecl,
+                        t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), [localeId])),
                         useEffectAsyncFetch,
                         returnStmt
                     ]));
@@ -390,6 +384,7 @@ export default function nixLocalePlugin(options) {
             const relativeUseLocaleImportPath = relativePath(path.dirname(id), useLocaleImportPath);
             ast.program.body.unshift(t.importDeclaration([t.importDefaultSpecifier(reactImportAlias)], t.stringLiteral("react")), t.importDeclaration([t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))], t.stringLiteral(relativeUseLocaleImportPath)));
             const output = generate(ast, {}, code);
+            console.log(output.code);
             return output;
         },
         // 5) Handle Hot Module Reload

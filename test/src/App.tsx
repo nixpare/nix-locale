@@ -10,7 +10,7 @@ function App() {
   const [locale, setLocale] = useState(DEFAULT_LOCALE)
 
   return (
-    <LocaleContext.Provider value={locale}>
+    <LocaleContext.Provider value={{ locale }}>
       <div>
         <a href="https://vite.dev" target="_blank">
           <img src={viteLogo} className="logo" alt="Vite logo" />
