@@ -1,16 +1,16 @@
-import { useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
-import { DEFAULT_LOCALE, LocaleContext, type LocaleType } from './hooks/locale'
+import { LocaleContext, type LocaleType } from './hooks/locale'
 import { T, useT } from './nix-locale/helper'
 
 function App() {
   const [count, setCount] = useState(0)
-  const [locale, setLocale] = useState(DEFAULT_LOCALE)
+  const { locale, setLocale } = useContext(LocaleContext)
 
   return (
-    <LocaleContext.Provider value={{ locale }}>
+    <>
       <div>
         <a href="https://vite.dev" target="_blank">
           <img src={viteLogo} className="logo" alt="Vite logo" />
@@ -22,15 +22,16 @@ function App() {
       <h1>Vite + React</h1>
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
-          {/* <T
+          <T
             it={({count}) => <>Il contatore è {count}</>}
             en={({count}) => <>The counter is {count}</>}
             arg={{count}}
-          /> */}
+          />
+          <br/>
           {useT({
             it: (count) => <>Il contatore è {count}</>,
             en: (count) => <>The counter is {count}</>
-          }, count, 'foo')}
+          }, count)}
         </button>
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR
@@ -47,7 +48,7 @@ function App() {
         <option value="it">IT</option>
         <option value="en">EN</option>
       </select>
-    </LocaleContext.Provider>
+    </>
   )
 }
 

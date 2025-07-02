@@ -323,9 +323,7 @@ export default function nixLocalePlugin(options) {
                     const importCall = (locale) => {
                         const importDecl = t.callExpression(t.import(), [localesModuleId(locale, scope)]);
                         const importWithThenDecl = t.callExpression(t.memberExpression(importDecl, t.identifier('then')), [
-                            t.arrowFunctionExpression([t.identifier('module')], t.blockStatement([
-                                t.returnStatement(t.memberExpression(t.identifier('module'), t.identifier(key)))
-                            ]))
+                            t.arrowFunctionExpression([t.identifier('module')], t.memberExpression(t.identifier('module'), t.identifier(key)))
                         ]);
                         return t.arrowFunctionExpression([], importWithThenDecl);
                     };
@@ -348,27 +346,51 @@ export default function nixLocalePlugin(options) {
                         t.variableDeclarator(localeId, t.callExpression(useLocaleImportAlias, []))
                     ]);
                     const propsId = argAttr && t.identifier('props');
-                    const propsMemoId = propsId && t.identifier('propsMemo');
-                    const propsMemoDecl = propsMemoId && t.variableDeclaration("const", [t.variableDeclarator(propsMemoId, t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useMemo')), [
-                            t.arrowFunctionExpression([], propsId),
-                            t.arrayExpression([propsId])
-                        ]))]);
                     const selectedId = t.identifier('selected');
-                    const useRefSelectedDecl = t.variableDeclaration('const', [t.variableDeclarator(selectedId, t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useRef')), [t.memberExpression(mapId, t.stringLiteral(defaultLocale), true)]))]);
-                    const currentSelectedId = t.memberExpression(selectedId, t.identifier('current'));
+                    const setSelectedId = t.identifier('setSelected');
+                    const useStateSelectedDecl = t.variableDeclaration('const', [t.variableDeclarator(t.arrayPattern([selectedId, setSelectedId]), t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useState')), 
+                        // THIS IS DONE BECAUSE React.useState, IF IT SEES A FUNCTION BEING PASSED TO IT,
+                        // IT CALLS THAT FUNCTION AUTOMATICALLY AND ASSIGNS TO THE NEW STATE THE RESULT
+                        // OF THAT FUNCTION. FUCK YOU REACT!
+                        [t.arrowFunctionExpression([], t.memberExpression(mapId, t.stringLiteral(defaultLocale), true))]))]);
                     const useEffectAsyncFetch = t.expressionStatement(t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useEffect')), [
-                        t.arrowFunctionExpression([], t.blockStatement([
-                            t.ifStatement(t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)), t.expressionStatement(t.assignmentExpression("=", currentSelectedId, t.memberExpression(mapId, localeId, true))), t.expressionStatement(t.callExpression(t.memberExpression(t.callExpression(t.memberExpression(mapId, localeId, true), []), t.identifier('then')), [t.arrowFunctionExpression([t.identifier('f')], t.assignmentExpression("=", currentSelectedId, t.identifier('f')))])))
-                        ])),
-                        t.arrayExpression([localeId])
+                        t.arrowFunctionExpression([], t.blockStatement((() => {
+                            const loaderId = t.identifier('loader');
+                            const loaderDecl = t.variableDeclaration('const', [t.variableDeclarator(loaderId, t.memberExpression(mapId, localeId, true))]);
+                            const defaultLocaleEarlyReturnIf = t.ifStatement(t.binaryExpression("===", localeId, t.stringLiteral(defaultLocale)), t.blockStatement([
+                                t.expressionStatement(t.callExpression(setSelectedId, [t.arrowFunctionExpression([], loaderId)])),
+                                t.returnStatement()
+                            ]));
+                            const cancelledId = t.identifier('cancelled');
+                            const cancelledDecl = t.variableDeclaration('let', [t.variableDeclarator(cancelledId, t.booleanLiteral(false))]);
+                            const loadId = t.identifier('load');
+                            const loadDecl = t.variableDeclaration('const', [t.variableDeclarator(loadId, t.arrowFunctionExpression([], t.blockStatement((() => {
+                                    const resultId = t.identifier('result');
+                                    const resultDecl = t.variableDeclaration('const', [t.variableDeclarator(resultId, t.awaitExpression(t.callExpression(loaderId, [])))]);
+                                    return [
+                                        resultDecl,
+                                        t.ifStatement(t.unaryExpression('!', cancelledId), t.expressionStatement(t.callExpression(setSelectedId, [t.arrowFunctionExpression([], resultId)])))
+                                    ];
+                                })()), true))]);
+                            return [
+                                loaderDecl,
+                                defaultLocaleEarlyReturnIf,
+                                cancelledDecl,
+                                loadDecl,
+                                t.expressionStatement(t.callExpression(loadId, [])),
+                                t.returnStatement(t.arrowFunctionExpression([], t.blockStatement([
+                                    t.expressionStatement(t.assignmentExpression('=', cancelledId, t.booleanLiteral(true)))
+                                ])))
+                            ];
+                        })())),
+                        t.arrayExpression([localeId, t.memberExpression(mapId, localeId, true)])
                     ]));
-                    const returnStmt = t.returnStatement(t.callExpression(currentSelectedId, propsId ? [propsId] : []));
+                    const returnStmt = t.returnStatement(t.callExpression(selectedId, propsId ? [propsId] : []));
                     const hookId = t.identifier(hookName);
                     const functionDecl = t.functionDeclaration(hookId, propsId ? [propsId] : [], t.blockStatement([
                         useLocaleDecl,
                         mapDecl,
-                        useRefSelectedDecl,
-                        t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), [localeId])),
+                        useStateSelectedDecl,
                         useEffectAsyncFetch,
                         returnStmt
                     ]));
@@ -384,7 +406,6 @@ export default function nixLocalePlugin(options) {
             const relativeUseLocaleImportPath = relativePath(path.dirname(id), useLocaleImportPath);
             ast.program.body.unshift(t.importDeclaration([t.importDefaultSpecifier(reactImportAlias)], t.stringLiteral("react")), t.importDeclaration([t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))], t.stringLiteral(relativeUseLocaleImportPath)));
             const output = generate(ast, {}, code);
-            console.log(output.code);
             return output;
         },
         // 5) Handle Hot Module Reload
@@ -412,4 +433,7 @@ function componentKey(id, count, version) {
     const [baseName] = relativeDir.replaceAll('.', '_').replaceAll('-', '_').replaceAll('/', '_').split('?');
     const componentBase = `${baseName}__${count}`;
     return [componentBase, `${componentBase}_${version}`];
+}
+function consoleLogStatement(...args) {
+    return t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), args));
 }
