@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import url from 'url';
 import fg from 'fast-glob';
+import { relativePath } from '../utils/path.js';
 
 const __filename = url.fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -83,7 +84,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 
 	const locales = options.locales;
 	const defaultLocale = options.default;
-	const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
+	const useLocaleImportPath = path.resolve(options.useLocaleImportPath || 'src/hooks/locale');
 
 	const virtualModules: Record<string, GeneratorResult> = {}
 
@@ -443,7 +444,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						)
 					)])
 
-					const propsId = argAttr && t.identifier('props');
+					const propsId = argAttr && t.identifier('arg');
 
 					const returnStmt = t.returnStatement(
 						t.jsxElement(
@@ -484,7 +485,9 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 					const functionId = t.identifier(compName)
 					const functionDecl = t.functionDeclaration(
 						functionId,
-						propsId ? [propsId] : [],
+						propsId ? [t.objectPattern([
+							t.objectProperty(propsId, propsId, false, true)
+						])] : [],
 						t.blockStatement([
 							mapDecl,
 							useLocaleDecl,
@@ -659,6 +662,21 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 					])
 
 					const propsId = argAttr && t.identifier('props');
+					const propsMemoId = propsId && t.identifier('propsMemo')
+
+					const propsMemoDecl = propsMemoId && t.variableDeclaration(
+						"const",
+						[t.variableDeclarator(
+							propsMemoId,
+							t.callExpression(
+								t.memberExpression(reactImportAlias, t.identifier('useMemo')),
+								[
+									t.arrowFunctionExpression([], propsId),
+									t.arrayExpression([propsId])
+								]
+							)
+						)]
+					)
 
 					const resultId = t.identifier('result')
 					const setResultId = t.identifier('setResult')
@@ -667,8 +685,8 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						t.callExpression(
 							t.memberExpression(reactImportAlias, t.identifier('useState')),
 							[t.callExpression(
-								t.memberExpression(mapId, localeId, true),
-								propsId ? [propsId] : []
+								t.memberExpression(mapId, t.stringLiteral(defaultLocale), true),
+								propsMemoId ? [propsMemoId] : []
 							)]
 						)
 					)])
@@ -696,7 +714,10 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 										t.expressionStatement(
 											t.callExpression(
 												setResultId,
-												[selectedId]
+												[t.callExpression(
+													selectedId,
+													propsMemoId ? [propsMemoId] : []
+												)]
 											)
 										),
 										t.expressionStatement(
@@ -711,7 +732,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 														setResultId,
 														[t.callExpression(
 															t.identifier('f'),
-															propsId ? [propsId] : []
+															propsMemoId ? [propsMemoId] : []
 														)]
 													)
 												)]
@@ -720,7 +741,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 									)
 								])
 							),
-							t.arrayExpression([localeId])
+							t.arrayExpression(propsMemoId ? [localeId, propsMemoId] : [localeId])
 						])
 					)
 
@@ -731,8 +752,13 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						hookId,
 						propsId ? [propsId] : [],
 						t.blockStatement([
-							mapDecl,
 							useLocaleDecl,
+							t.expressionStatement(t.callExpression(
+								t.memberExpression(t.identifier('console'), t.identifier('log')),
+								[localeId]
+							)),
+							propsMemoDecl || t.emptyStatement(),
+							mapDecl,
 							useStateResultDecl,
 							useEffectAsyncFetch,
 							returnStmt
@@ -757,6 +783,8 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 				return;
 			}
 
+			const relativeUseLocaleImportPath = relativePath(path.dirname(id), useLocaleImportPath)
+
 			ast.program.body.unshift(
 				t.importDeclaration(
 					[t.importDefaultSpecifier(reactImportAlias)],
@@ -764,7 +792,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 				),
 				t.importDeclaration(
 					[t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))],
-					t.stringLiteral(useLocaleImportPath)
+					t.stringLiteral(relativeUseLocaleImportPath)
 				)
 			);
 

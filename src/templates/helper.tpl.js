@@ -19,7 +19,6 @@ export function useT(locales, arg, _) {
 	return selected;
 }
 
-
 export function T(props) {
 	const { arg, scope: _, ...locales } = props;
 

@@ -1,5 +1,4 @@
-import { type ReactNode } from 'react';
-import { DEFAULT_LOCALE, useLocale, type LocaleType, type LocaleScopes } from '__LOCALE_IMPORT_PATH__';
+import { DEFAULT_LOCALE, useLocale, type LocaleType, type LocaleScopes } from 'src/hooks/locale';
 
 export type TranslationMap<T> = {
 	[L in LocaleType]: T;
@@ -42,18 +41,18 @@ export function useT(locales: TranslationMap<any>, arg?: any, _?: LocaleScopes):
 }
 
 export type TProps<P> = (
-	TranslationMap<ReactNode> & {
+	TranslationMap<React.ReactNode> & {
 		arg?: undefined
 		scope?: LocaleScopes
 	}
 ) | (
-	TranslationMap<ReactNode | ((props: P) => ReactNode)> & {
+	TranslationMap<React.ReactNode | ((props: P) => React.ReactNode)> & {
 		arg: NonNullable<P>
 		scope?: LocaleScopes
 	}
 )
 
-export function T<P>(props: TProps<P>): ReactNode {
+export function T<P>(props: TProps<P>): React.ReactNode {
 	const { arg, scope: _, ...locales } = props;
 
 	const locale = useLocale();

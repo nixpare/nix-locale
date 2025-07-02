@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { DEFAULT_LOCALE, useLocale, type LocaleType, type LocaleScopes } from '__LOCALE_IMPORT_PATH__';
+import { DEFAULT_LOCALE, useLocale, type LocaleType, type LocaleScopes } from '../hooks/locale';
 
 export type TranslationMap<T> = {
 	[L in LocaleType]: T;
@@ -41,7 +41,7 @@ export function useT(locales: TranslationMap<any>, arg?: any, _?: LocaleScopes):
 	return selected;
 }
 
-export type TProps<P> = (
+export type TProps<P extends object> = (
 	TranslationMap<ReactNode> & {
 		arg?: undefined
 		scope?: LocaleScopes
@@ -53,7 +53,7 @@ export type TProps<P> = (
 	}
 )
 
-export function T<P>(props: TProps<P>): ReactNode {
+export function T<P extends object>(props: TProps<P>): ReactNode {
 	const { arg, scope: _, ...locales } = props;
 
 	const locale = useLocale();

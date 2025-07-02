@@ -1,6 +1,7 @@
-import { type LocaleType, type LocaleScopes } from '__LOCALE_IMPORT_PATH__';
+import { type ReactNode } from 'react';
+import { DEFAULT_LOCALE, useLocale, type LocaleType, type LocaleScopes } from '__LOCALE_IMPORT_PATH__';
 
-type TranslationMap<T> = {
+export type TranslationMap<T> = {
 	[L in LocaleType]: T;
 };
 
@@ -9,35 +10,30 @@ export function t<R>(
 ): R;
 export function t<P, R>(
 	locales: TranslationMap<R | ((props: P) => R)>,
-	arg: P
+	arg: NonNullable<P>
 ): R;
 
-export function useT<R>(
-	locales: TranslationMap<R>
-): R;
 export function useT<R>(
 	locales: TranslationMap<R>,
-	arg: undefined,
-	scope: LocaleScopes
+	arg?: undefined,
+	scope?: LocaleScopes
 ): R;
 export function useT<P, R>(
 	locales: TranslationMap<R | ((props: P) => R)>,
-	arg: P
-): R;
-export function useT<P, R>(
-	locales: TranslationMap<R | ((props: P) => R)>,
-	arg: P,
-	scope: LocaleScopes
+	arg: NonNullable<P>,
+	scope?: LocaleScopes
 ): R;
 
-export function T<R>(
-	props: TranslationMap<R> & {
+export type TProps<P> = (
+	TranslationMap<ReactNode> & {
+		arg?: undefined
 		scope?: LocaleScopes
 	}
-): R;
-export function T<P, R>(
-	props: TranslationMap<R | ((props: P) => R)> & {
-		arg: P,
+) | (
+	TranslationMap<ReactNode | ((props: P) => ReactNode)> & {
+		arg: NonNullable<P>
 		scope?: LocaleScopes
 	}
-): R;
+)
+
+export function T<P>(props: TProps<P>): ReactNode;

@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import url from 'url';
 import fg from 'fast-glob';
+import { relativePath } from '../utils/path.js';
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // @ts-ignore
@@ -30,7 +31,7 @@ export default function nixLocalePlugin(options) {
     const filter = createFilter(includeOption, options.exclude || 'node_modules/**/*');
     const locales = options.locales;
     const defaultLocale = options.default;
-    const useLocaleImportPath = options.useLocaleImportPath || 'src/hooks/locale';
+    const useLocaleImportPath = path.resolve(options.useLocaleImportPath || 'src/hooks/locale');
     const virtualModules = {};
     // @ts-ignore
     const context = globalThis.__NIX_LOCALE_STATE__;
@@ -243,12 +244,14 @@ export default function nixLocalePlugin(options) {
                     ]);
                     const fallbackName = 'Fallback';
                     const fallbackDecl = t.variableDeclaration('const', [t.variableDeclarator(t.identifier(fallbackName), t.logicalExpression('||', t.memberExpression(t.identifier('Map'), t.memberExpression(t.identifier('prevLocaleRef'), t.identifier('current')), true), t.arrowFunctionExpression([], t.stringLiteral('NixLocale error: Fallback component not found'))))]);
-                    const propsId = argAttr && t.identifier('props');
+                    const propsId = argAttr && t.identifier('arg');
                     const returnStmt = t.returnStatement(t.jsxElement(t.jsxOpeningElement(t.jsxMemberExpression(t.jsxIdentifier(reactImportAlias.name), t.jsxIdentifier('Suspense')), [t.jsxAttribute(t.jsxIdentifier('fallback'), t.jsxExpressionContainer(t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier(fallbackName), propsId ? [t.jsxSpreadAttribute(propsId)] : [], true), null, [], true)))], false), t.jsxClosingElement(t.jsxMemberExpression(t.jsxIdentifier(reactImportAlias.name), t.jsxIdentifier('Suspense'))), [
                         t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier('Selected'), propsId ? [t.jsxSpreadAttribute(propsId)] : [], true), null, [], true)
                     ], false));
                     const functionId = t.identifier(compName);
-                    const functionDecl = t.functionDeclaration(functionId, propsId ? [propsId] : [], t.blockStatement([
+                    const functionDecl = t.functionDeclaration(functionId, propsId ? [t.objectPattern([
+                            t.objectProperty(propsId, propsId, false, true)
+                        ])] : [], t.blockStatement([
                         mapDecl,
                         useLocaleDecl,
                         usePrevLocaleDecl,
@@ -345,9 +348,14 @@ export default function nixLocalePlugin(options) {
                         t.variableDeclarator(localeId, t.callExpression(useLocaleImportAlias, []))
                     ]);
                     const propsId = argAttr && t.identifier('props');
+                    const propsMemoId = propsId && t.identifier('propsMemo');
+                    const propsMemoDecl = propsMemoId && t.variableDeclaration("const", [t.variableDeclarator(propsMemoId, t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useMemo')), [
+                            t.arrowFunctionExpression([], propsId),
+                            t.arrayExpression([propsId])
+                        ]))]);
                     const resultId = t.identifier('result');
                     const setResultId = t.identifier('setResult');
-                    const useStateResultDecl = t.variableDeclaration('const', [t.variableDeclarator(t.arrayPattern([resultId, setResultId]), t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useState')), [t.callExpression(t.memberExpression(mapId, localeId, true), propsId ? [propsId] : [])]))]);
+                    const useStateResultDecl = t.variableDeclaration('const', [t.variableDeclarator(t.arrayPattern([resultId, setResultId]), t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useState')), [t.callExpression(t.memberExpression(mapId, t.stringLiteral(defaultLocale), true), propsMemoId ? [propsMemoId] : [])]))]);
                     const selectedId = t.identifier('selected');
                     const selectedDecl = t.variableDeclaration('const', [
                         t.variableDeclarator(selectedId, t.memberExpression(mapId, localeId, true))
@@ -355,15 +363,17 @@ export default function nixLocalePlugin(options) {
                     const useEffectAsyncFetch = t.expressionStatement(t.callExpression(t.memberExpression(reactImportAlias, t.identifier('useEffect')), [
                         t.arrowFunctionExpression([], t.blockStatement([
                             selectedDecl,
-                            t.ifStatement(t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)), t.expressionStatement(t.callExpression(setResultId, [selectedId])), t.expressionStatement(t.callExpression(t.memberExpression(t.callExpression(selectedId, []), t.identifier('then')), [t.arrowFunctionExpression([t.identifier('f')], t.callExpression(setResultId, [t.callExpression(t.identifier('f'), propsId ? [propsId] : [])]))])))
+                            t.ifStatement(t.binaryExpression('===', localeId, t.stringLiteral(defaultLocale)), t.expressionStatement(t.callExpression(setResultId, [t.callExpression(selectedId, propsMemoId ? [propsMemoId] : [])])), t.expressionStatement(t.callExpression(t.memberExpression(t.callExpression(selectedId, []), t.identifier('then')), [t.arrowFunctionExpression([t.identifier('f')], t.callExpression(setResultId, [t.callExpression(t.identifier('f'), propsMemoId ? [propsMemoId] : [])]))])))
                         ])),
-                        t.arrayExpression([localeId])
+                        t.arrayExpression(propsMemoId ? [localeId, propsMemoId] : [localeId])
                     ]));
                     const returnStmt = t.returnStatement(resultId);
                     const hookId = t.identifier(hookName);
                     const functionDecl = t.functionDeclaration(hookId, propsId ? [propsId] : [], t.blockStatement([
-                        mapDecl,
                         useLocaleDecl,
+                        t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), [localeId])),
+                        propsMemoDecl || t.emptyStatement(),
+                        mapDecl,
                         useStateResultDecl,
                         useEffectAsyncFetch,
                         returnStmt
@@ -377,7 +387,8 @@ export default function nixLocalePlugin(options) {
             if (!modified) {
                 return;
             }
-            ast.program.body.unshift(t.importDeclaration([t.importDefaultSpecifier(reactImportAlias)], t.stringLiteral("react")), t.importDeclaration([t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))], t.stringLiteral(useLocaleImportPath)));
+            const relativeUseLocaleImportPath = relativePath(path.dirname(id), useLocaleImportPath);
+            ast.program.body.unshift(t.importDeclaration([t.importDefaultSpecifier(reactImportAlias)], t.stringLiteral("react")), t.importDeclaration([t.importSpecifier(useLocaleImportAlias, t.identifier(useLocaleName))], t.stringLiteral(relativeUseLocaleImportPath)));
             const output = generate(ast, {}, code);
             return output;
         },

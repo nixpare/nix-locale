@@ -28,12 +28,13 @@
   "type": "module",
   "exports": {
     "./plugin": {
-      "import": "./dist/plugin.js",
-      "types": "./dist/plugin.d.ts"
+      "import": "./dist/plugin/plugin.js",
+      "types": "./dist/plugin/plugin.d.ts"
     }
   },
+  "main": "dist/cli/index.js",
   "bin": {
-    "nix-locale": "dist/index.js"
+    "nix-locale": "dist/cli/index.js"
   },
   "files": [
     "dist",
