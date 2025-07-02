@@ -1,1 +1,0 @@
-export const src_App_tsx__0_0 = () => "Ciao"

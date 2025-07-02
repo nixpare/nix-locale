@@ -41,7 +41,7 @@ export function useT(locales: TranslationMap<any>, arg?: any, _?: LocaleScopes):
 	return selected;
 }
 
-export type TProps<P extends object> = (
+export type TProps<P> = (
 	TranslationMap<ReactNode> & {
 		arg?: undefined
 		scope?: LocaleScopes

@@ -32,7 +32,7 @@ const importPath = (await inquirer.prompt([
 	},
 ])).importPath
 
-const templatePathPrefix = '../src/templates/helper.tpl'
+const templatePathPrefix = '../../src/templates/helper.tpl'
 const helperModulePathPrefix = `${helperModuleDir}/helper`
 
 const relativeImportPath = relativePath(

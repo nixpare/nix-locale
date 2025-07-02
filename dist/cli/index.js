@@ -26,7 +26,7 @@ const importPath = (await inquirer.prompt([
         default: `${projectRoot}/hooks/locale`
     },
 ])).importPath;
-const templatePathPrefix = '../src/templates/helper.tpl';
+const templatePathPrefix = '../../src/templates/helper.tpl';
 const helperModulePathPrefix = `${helperModuleDir}/helper`;
 const relativeImportPath = relativePath(path.resolve(helperModuleDir), path.resolve(importPath));
 const tsTemplatePath = path.resolve(__dirname, `${templatePathPrefix}.ts`);
