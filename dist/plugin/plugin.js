@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 // @ts-ignore
 if (!globalThis.__NIX_LOCALE_STATE__)
     globalThis.__NIX_LOCALE_STATE__ = {
-        version: 0,
+        version: {},
         translations: new Map()
     };
 const staticHelper = 't';
@@ -53,13 +53,18 @@ export default function nixLocalePlugin(options) {
                 plugins: ['typescript', 'jsx'],
             });
             let translationCount = 0;
+            let version = context.version[id];
+            if (!version) {
+                version = 0;
+                context.version[id] = version;
+            }
             // @ts-ignore
             traverse.default(ast, {
                 JSXElement(nodePath) {
                     if (!t.isJSXIdentifier(nodePath.node.openingElement.name, { name: componentHelper })) {
                         return;
                     }
-                    const [componentBase, key] = componentKey(id, translationCount++, context.version);
+                    const [componentBase, key] = componentKey(id, translationCount++, version);
                     // locale => localized_value
                     const translationElements = {};
                     let scope = '';
@@ -104,7 +109,7 @@ export default function nixLocalePlugin(options) {
                     if (!t.isObjectExpression(nodePath.node.arguments[0])) {
                         return;
                     }
-                    const [componentBase, key] = componentKey(id, translationCount++, context.version);
+                    const [componentBase, key] = componentKey(id, translationCount++, version);
                     // locale => localized_value
                     const translationElements = {};
                     nodePath.node.arguments[0].properties.forEach(prop => {
@@ -161,6 +166,7 @@ export default function nixLocalePlugin(options) {
     };
     return {
         name: 'vite-nix-locale',
+        apply: 'build',
         enforce: 'pre',
         configResolved(config) {
             root = config.root;
@@ -192,13 +198,18 @@ export default function nixLocalePlugin(options) {
             });
             let modified = false;
             let translationCount = 0;
+            let version = context.version[id];
+            if (!version) {
+                version = 0;
+                context.version[id] = version;
+            }
             // @ts-ignore
             traverse.default(ast, {
                 JSXElement(nodePath) {
                     if (!t.isJSXIdentifier(nodePath.node.openingElement.name, { name: componentHelper })) {
                         return;
                     }
-                    const [_, key] = componentKey(id, translationCount++, context.version);
+                    const [_, key] = componentKey(id, translationCount++, version);
                     const argAttr = nodePath.node.openingElement.attributes.find(attr => {
                         return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg';
                     });
@@ -309,7 +320,7 @@ export default function nixLocalePlugin(options) {
                     if (!t.isObjectExpression(nodePath.node.arguments[0])) {
                         return;
                     }
-                    const [_, key] = componentKey(id, translationCount++, context.version);
+                    const [_, key] = componentKey(id, translationCount++, version);
                     const argAttr = nodePath.node.arguments[1];
                     let scope = '';
                     const scopeArg = nodePath.node.arguments[2];
@@ -413,7 +424,10 @@ export default function nixLocalePlugin(options) {
             if (!filter(file)) {
                 return modules;
             }
-            context.version++;
+            const version = context.version[file];
+            if (version) {
+                context.version[file] = version + 1;
+            }
             await generateLocalesModules(file);
             const invalidatedModules = [...modules];
             for (const modId of Object.keys(virtualModules)) {

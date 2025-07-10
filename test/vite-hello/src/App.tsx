@@ -23,11 +23,11 @@ function App() {
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
           <T
-            it={({count}) => <>Il contatore è {count}</>}
-            en={({count}) => <>The counter is {count}</>}
-            arg={{count}}
+            it={({ count }) => <>Il contatore è {count}</>}
+            en={({ count }) => <>The counter is {count}</>}
+            arg={{ count }}
           />
-          <br/>
+          <br />
           <UseT_asComponent count={count} />
         </button>
         <p>

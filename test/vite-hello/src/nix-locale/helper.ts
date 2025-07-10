@@ -47,11 +47,11 @@ export type TProps<P> = (
 		scope?: LocaleScopes
 	}
 ) | (
-	TranslationMap<ReactNode | ((props: P) => ReactNode)> & {
-		arg: NonNullable<P>
-		scope?: LocaleScopes
-	}
-)
+		TranslationMap<ReactNode | ((props: P) => ReactNode)> & {
+			arg: NonNullable<P>
+			scope?: LocaleScopes
+		}
+	)
 
 export function T<P extends object>(props: TProps<P>): ReactNode {
 	const { arg, scope: _, ...locales } = props;

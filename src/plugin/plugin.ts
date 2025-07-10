@@ -56,13 +56,13 @@ type TranslationElement<T> = {
 type TranslationsMap<T> = Map<string, Map<string, Map<string, TranslationElement<T>>>>
 
 type ContextType = {
-	version: number
+	version: Record<string, number | undefined>
 	translations: TranslationsMap<t.Expression>
 }
 
 // @ts-ignore
 if (!globalThis.__NIX_LOCALE_STATE__) globalThis.__NIX_LOCALE_STATE__ = {
-	version: 0,
+	version: {},
 	translations: new Map()
 } satisfies ContextType;
 
@@ -111,6 +111,11 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 			});
 
 			let translationCount = 0;
+			let version = context.version[id];
+			if (!version) {
+				version = 0;
+				context.version[id] = version;
+			}
 
 			// @ts-ignore
 			(traverse.default as typeof traverse)(ast, {
@@ -119,7 +124,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++, context.version);
+					const [componentBase, key] = componentKey(id, translationCount++, version);
 
 					// locale => localized_value
 					const translationElements: Record<string, t.Expression> = {}
@@ -171,7 +176,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [componentBase, key] = componentKey(id, translationCount++, context.version);
+					const [componentBase, key] = componentKey(id, translationCount++, version);
 
 					// locale => localized_value
 					const translationElements: Record<string, t.Expression> = {}
@@ -257,6 +262,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 
 	return {
 		name: 'vite-nix-locale',
+		apply: 'build',
 		enforce: 'pre',
 
 		configResolved(config) {
@@ -295,6 +301,11 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 
 			let modified = false;
 			let translationCount = 0;
+			let version = context.version[id];
+			if (!version) {
+				version = 0;
+				context.version[id] = version;
+			}
 
 			// @ts-ignore
 			(traverse.default as typeof traverse)(ast, {
@@ -303,7 +314,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [_, key] = componentKey(id, translationCount++, context.version);
+					const [_, key] = componentKey(id, translationCount++, version);
 
 					const argAttr = nodePath.node.openingElement.attributes.find(attr => {
 						return t.isJSXAttribute(attr) && t.isJSXIdentifier(attr.name) && attr.name.name === 'arg'
@@ -576,7 +587,7 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 						return;
 					}
 
-					const [_, key] = componentKey(id, translationCount++, context.version);
+					const [_, key] = componentKey(id, translationCount++, version);
 					const argAttr = nodePath.node.arguments[1] as typeof nodePath.node.arguments[1] | undefined;
 					
 					let scope = ''
@@ -813,7 +824,10 @@ export default function nixLocalePlugin(options: NixLocaleOptions): Plugin {
 				return modules;
 			}
 
-			context.version++;
+			const version = context.version[file];
+			if (version) {
+				context.version[file] = version+1;
+			}
 			await generateLocalesModules(file);
 
 			const invalidatedModules = [...modules];
